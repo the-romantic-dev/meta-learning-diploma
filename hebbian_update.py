@@ -23,31 +23,31 @@ def hebbian_update(heb_rule: str,
         o_out = outputs[z].to(device).unsqueeze(0)
         # reshape coefficients and compute delta
         if heb_rule == 'A':
-            A = coeffs.view(out_dim, in_dim)
+            A = coeffs.view(out_dim, in_dim).to(device)
             delta = A * (o_in * o_out)
         elif heb_rule == 'AD':
-            A, D = [coeff.view(out_dim, in_dim) for coeff in coeffs.view(-1, 2).T]
+            A, D = [coeff.view(out_dim, in_dim).to(device) for coeff in coeffs.view(-1, 2).T]
             delta = A * (o_in * o_out) + D
         elif heb_rule == 'AD_lr':
-            A, D, lr = [coeff.view(out_dim, in_dim) for coeff in coeffs.view(-1, 3).T]
+            A, D, lr = [coeff.view(out_dim, in_dim).to(device) for coeff in coeffs.view(-1, 3).T]
             delta = lr * (A * (o_in * o_out) + D)
         elif heb_rule == 'ABC':
-            A, B, C = [coeff.view(out_dim, in_dim) for coeff in coeffs.view(-1, 3).T]
+            A, B, C = [coeff.view(out_dim, in_dim).to(device) for coeff in coeffs.view(-1, 3).T]
             delta = (A * o_in * o_out + B * o_out + C * o_in)
         elif heb_rule == 'ABC_lr':
-            A, B, C, lr = [coeff.view(out_dim, in_dim) for coeff in coeffs.view(-1, 4).T]
+            A, B, C, lr = [coeff.view(out_dim, in_dim).to(device) for coeff in coeffs.view(-1, 4).T]
             delta = lr * (A * o_in * o_out + B * o_out + C * o_in)
         elif heb_rule == 'ABCD':
-            A, B, C, D = [coeff.view(out_dim, in_dim) for coeff in coeffs.view(-1, 4).T]
+            A, B, C, D = [coeff.view(out_dim, in_dim).to(device) for coeff in coeffs.view(-1, 4).T]
             delta = (A * o_in * o_out + B * o_out + C * o_in + D)
         elif heb_rule == 'ABCD_lr':
-            A, B, C, lr, D = [coeff.view(out_dim, in_dim) for coeff in coeffs.view(-1, 5).T]
+            A, B, C, lr, D = [coeff.view(out_dim, in_dim).to(device) for coeff in coeffs.view(-1, 5).T]
             delta = lr * (A * o_in * o_out + B * o_out + C * o_in + D)
         elif heb_rule == 'ABCD_lr_D_out':
-            A, B, C, lr, D = [coeff.view(out_dim, in_dim) for coeff in coeffs.view(-1, 5).T]
+            A, B, C, lr, D = [coeff.view(out_dim, in_dim).to(device) for coeff in coeffs.view(-1, 5).T]
             delta = (lr * (A * o_in * o_out + B * o_out + C * o_in) + D)
         elif heb_rule == 'ABCD_lr_D_in_and_out':
-            A, B, C, lr, D_in, D_out = [coeff.view(out_dim, in_dim) for coeff in coeffs.view(-1, 6).T]
+            A, B, C, lr, D_in, D_out = [coeff.view(out_dim, in_dim).to(device) for coeff in coeffs.view(-1, 6).T]
             delta = (lr * (A * o_in * o_out + B * o_out + C * o_in + D_in) + D_out)
         else:
             raise ValueError(f"Unknown heb_rule '{hebbian_update.__name__}'")
