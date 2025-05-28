@@ -62,7 +62,7 @@ def init_policy_weights(init_weights_type, is_pixel_env, policy, initial_weights
         _weights_init(m, init_weights_type)
 
     if init_weights_type == 'coevolve':
-        nn.utils.vector_to_parameters(torch.tensor(initial_weights_co, dtype=torch.float32), policy.parameters())
+        nn.utils.vector_to_parameters(initial_weights_co, policy.parameters())
     else:
         # Randomly sample initial weights from chosen distribution
         policy.apply(weights_init)
@@ -71,8 +71,8 @@ def init_policy_weights(init_weights_type, is_pixel_env, policy, initial_weights
         if is_pixel_env:
             cnn_weights1 = initial_weights_co[:162]
             cnn_weights2 = initial_weights_co[162:]
-            list(policy.parameters())[0].data = torch.tensor(cnn_weights1.reshape((6,3,3,3))).float()
-            list(policy.parameters())[1].data = torch.tensor(cnn_weights2.reshape((8,6,5,5))).float()
+            list(policy.parameters())[0].data = cnn_weights1.reshape((6,3,3,3))
+            list(policy.parameters())[1].data = cnn_weights2.reshape((8,6,5,5))
     return policy.float()
 
 def fitness_hebb(hebb_rule : str, environment : str, init_weights_type = 'uni' , *evolved_parameters: List[np.array]) -> float:
@@ -84,25 +84,18 @@ def fitness_hebb(hebb_rule : str, environment : str, init_weights_type = 'uni' ,
     """
 
     # Unpack evolved parameters
-    hebb_coeffs = evolved_parameters[0]
-    initial_weights_co = evolved_parameters[1] if len(evolved_parameters) > 1 else None
+    hebb_coeffs = torch.from_numpy(evolved_parameters[0])
+    initial_weights_co = torch.from_numpy(evolved_parameters[1]) if len(evolved_parameters) > 1 else None
 
     with torch.no_grad():
         env, pixel_env, input_dim = make_env(environment)
+        env: gym.Env = env
         action_dim = get_action_dim(env)
         policy = make_policy(pixel_env, action_dim, input_dim)
         policy = init_policy_weights(init_weights_type, pixel_env, policy, initial_weights_co)
-        # Unpack network's weights
-        if pixel_env:
-            weightsCNN1, weightsCNN2, weights1_2, weights2_3, weights3_4 = list(policy.parameters())
-        else:
-            weights1_2, weights2_3, weights3_4 = list(policy.parameters())
 
-
-        # Convert weights to numpy so we can JIT them with Numba
-        weights1_2 = weights1_2.detach().numpy()
-        weights2_3 = weights2_3.detach().numpy()
-        weights3_4 = weights3_4.detach().numpy()
+        weights = [w.detach() for w in policy.parameters()]
+        weights = weights[2:] if pixel_env else weights
 
         observation = env.reset()[0]
         observation = observation if not pixel_env else np.swapaxes(observation,0,2) #(3, 84, 84)
@@ -121,30 +114,30 @@ def fitness_hebb(hebb_rule : str, environment : str, init_weights_type = 'uni' ,
         rew_ep = 0
         t = 0
         while True:
-
             # For obaservation ∈ gym.spaces.Discrete, we one-hot encode the observation
             if isinstance(env.observation_space, Discrete):
                 observation = (observation == torch.arange(env.observation_space.n)).float()
 
-            o0, o1, o2, o3 = policy([observation])
-            o0 = o0.numpy()
-            o1 = o1.numpy()
-            o2 = o2.numpy()
+            outputs = list(policy([observation]))
+            # outputs[0] = outputs[0].numpy()
+            # outputs[1] = outputs[1].numpy()
+            # outputs[2] = outputs[2].numpy()
 
             # Bounding the action space
             if 'CarRacing' in environment:
-                action = np.array([ torch.tanh(o3[0]), torch.sigmoid(o3[1]), torch.sigmoid(o3[2]) ]).astype(np.float32)
-                o3 = o3.numpy()
+                action = np.array([
+                    torch.tanh(outputs[3][0]), torch.sigmoid(outputs[3][1]), torch.sigmoid(outputs[3][2]) ]).astype(np.float32)
+                # outputs[3] = outputs[3].numpy()
             elif 'AntBulletEnv' in environment:
-                o3 = torch.tanh(o3).numpy()
-                action = o3
+                outputs[3] = torch.tanh(outputs[3])
+                action = outputs[3].numpy()
             else:
                 if isinstance(env.action_space, Box):
-                    action = o3.numpy()
+                    action = outputs[3].numpy()
                     action = np.clip(action, env.action_space.low, env.action_space.high)
                 elif isinstance(env.action_space, Discrete):
-                    action = np.argmax(o3).numpy()
-                o3 = o3.numpy()
+                    action = np.argmax(outputs[3]).numpy()
+                # outputs[3] = outputs[3].numpy()
 
 
             # Environment simulation step
@@ -179,7 +172,7 @@ def fitness_hebb(hebb_rule : str, environment : str, init_weights_type = 'uni' ,
             t += 1
 
             #### Episodic/Intra-life hebbian update of the weights
-            weights1_2, weights2_3, weights3_4 = hebbian_update(hebb_rule, hebb_coeffs, [weights1_2, weights2_3, weights3_4], [o0, o1, o2, o3])
+            weights = hebbian_update(hebb_rule, hebb_coeffs, weights, outputs)
 
             # Normalise weights per layer
             if normalised_weights:
@@ -188,11 +181,6 @@ def fitness_hebb(hebb_rule : str, environment : str, init_weights_type = 'uni' ,
               for i in indices:
                 p = params[i]
                 p.data /= p.abs().max()
-              # list(policy.parameters())[a].data /= list(policy.parameters())[a].__abs__().max()
-              # list(policy.parameters())[b].data /= list(policy.parameters())[b].__abs__().max()
-              # list(policy.parameters())[c].data /= list(policy.parameters())[c].__abs__().max()
-
-
         env.close()
 
     return rew_ep

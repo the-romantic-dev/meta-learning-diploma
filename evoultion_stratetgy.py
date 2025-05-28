@@ -1,3 +1,6 @@
+from datetime import datetime
+from pathlib import Path
+
 import torch
 import numpy as np
 import multiprocessing as mp
@@ -171,8 +174,10 @@ class EvolutionStrategyHebb(object):
         weights = self.initial_weights_co if coevolved_param else self.coeffs
         for i in range(int(self.POPULATION_SIZE / 2)):
             x = [np.random.randn(*w.shape) for w in weights]  # j: (coefficients_per_synapse, 1) eg. (5,1)
-            x2 = [-np.random.randn(*w.shape) for w in weights]  # x: (coefficients_per_synapse, number of synapses) eg. (92690, 5)
-            population.append(x)  # population : (population size, coefficients_per_synapse, number of synapses), eg. (10, 92690, 5)
+            x2 = [-np.random.randn(*w.shape) for w in
+                  weights]  # x: (coefficients_per_synapse, number of synapses) eg. (92690, 5)
+            population.append(
+                x)  # population : (population size, coefficients_per_synapse, number of synapses), eg. (10, 92690, 5)
             population.append(x2)
         return np.array(population).astype(np.float32)
 
@@ -200,14 +205,14 @@ class EvolutionStrategyHebb(object):
                 )
                 for p in population
             ]
-        return  np.array(rewards).astype(np.float32)
+        return np.array(rewards).astype(np.float32)
 
     def _get_rewards_coevolved(self, pool, population, population_coevolved):
         if pool is not None:
             worker_args = []
             for z in tqdm(
-                range(len(population)),
-                desc=f'Обработка популяции'):
+                    range(len(population)),
+                    desc=f'Обработка популяции'):
                 heb_coeffs_try = np.array(
                     [self.coeffs[index] + self.SIGMA * i for index, i in enumerate(population[z])]
                 ).astype(np.float32)
@@ -217,7 +222,8 @@ class EvolutionStrategyHebb(object):
                 ).astype(np.float32)
 
                 worker_args.append((
-                    self.get_reward, self.config.hebb_rule, self.config.environment, self.config.init_weights, heb_coeffs_try,
+                    self.get_reward, self.config.hebb_rule, self.config.environment, self.config.init_weights,
+                    heb_coeffs_try,
                     coevolved_parameters_try))
             print('Начало параллельной обработки')
             start_time = time.time()
@@ -228,13 +234,14 @@ class EvolutionStrategyHebb(object):
         else:
             rewards = []
             for z in tqdm(
-                range(len(population)),
-                desc=f'Обработка популяции'):
+                    range(len(population)),
+                    desc=f'Обработка популяции'):
                 # print(f'Обработка элемента популяции {z + 1} из {len(population)}')
                 heb_coeffs_try = np.array(self._get_params_try(self.coeffs, population[z])).astype(np.float32)
                 coevolved_parameters_try = np.array(
                     self._get_params_try(self.initial_weights_co, population_coevolved[z])).astype(np.float32)
-                rewards.append(self.get_reward(self.config.hebb_rule, self.config.environment, self.config.init_weights, heb_coeffs_try,
+                rewards.append(self.get_reward(self.config.hebb_rule, self.config.environment, self.config.init_weights,
+                                               heb_coeffs_try,
                                                coevolved_parameters_try))
 
         rewards = np.array(rewards).astype(np.float32)
@@ -251,7 +258,6 @@ class EvolutionStrategyHebb(object):
         self.update_factor = self.learning_rate / (self.POPULATION_SIZE * self.SIGMA)
         for index, c in enumerate(self.coeffs):
             layer_population = np.array([p[index] for p in population])
-
 
             self.coeffs[index] = c + self.update_factor * np.dot(layer_population.T, rewards).T
 
@@ -279,22 +285,31 @@ class EvolutionStrategyHebb(object):
 
     def run(self, iterations, print_step=10, path='/content/hebb_coeffs'):
 
-        id_ = str(int(time.time()))
-        if not exists(path + '/' + id_):
-            os.makedirs(path + '/' + id_, exist_ok=True)
+        timestamp = time.time()
+        dt_str = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H-%M-%S')
+        experiment_folder_name = f'{self.environment.split("-")[0]}_{self.hebb_rule}_{self.init_weights}_{self.POPULATION_SIZE}_{iterations}_{self.config.distribution} {dt_str}'
+        folder = Path(path, experiment_folder_name)
+        if not exists(folder):
+            os.makedirs(folder, exist_ok=True)
 
-        print('Run: ' + id_ + '\n\n........................................................................\n')
+        print("CUDA доступна:", torch.cuda.is_available())
+        # Если CUDA доступна, вывод информации о видеокарте
+        if torch.cuda.is_available():
+            print("Имя устройства:", torch.cuda.get_device_name(0))
+            print("Количество доступных устройств:", torch.cuda.device_count())
+        print(f'Запуск от {dt_str}\n\n{"." * 72}\n')
 
         pool = mp.Pool(self.num_threads) if self.num_threads > 1 else None
 
         generations_rewards = []
 
         for iteration in range(iterations):  # Algorithm 2. Salimans, 2017: https://arxiv.org/abs/1703.03864
-            population = self._get_population() # Sample normal noise:         Step 5
+            population = self._get_population()  # Sample normal noise:         Step 5
             # Evolution of Hebbian coefficients & coevolution of cnn parameters and/or initial weights
             if self.pixel_env or self.coevolve_init:
                 population_coevolved = self._get_population(coevolved_param=True)  # Sample normal noise:         Step 5
-                rewards = self._get_rewards_coevolved(pool, population, population_coevolved)  # Compute population fitness:  Step 6
+                rewards = self._get_rewards_coevolved(pool, population,
+                                                      population_coevolved)  # Compute population fitness:  Step 6
                 self._update_coeffs(rewards, population)  # Update coefficients:         Steps 8->12
                 self._update_coevolved_param(rewards, population_coevolved)  # Update coevolved parameters: Steps 8->12
 
@@ -310,28 +325,19 @@ class EvolutionStrategyHebb(object):
                     iteration + 1, rew_, self.update_factor, self.learning_rate, int(np.sum(self.coeffs)),
                     int(np.sum(abs(self.coeffs)))), flush=True)
 
-                if rew_ > 100:
-                    torch.save(self.get_coeffs(), path + "/" + id_ + '/HEBcoeffs__' + self.environment + "__rew_" + str(
-                        int(rew_)) + '__' + self.hebb_rule + "__init_" + str(self.init_weights) + "__pop_" + str(
-                        self.POPULATION_SIZE) + '__coeffs' + "__{}.dat".format(iteration))
-                    if self.coevolve_init:
-                        torch.save(self.get_coevolved_parameters(),
-                                   path + "/" + id_ + '/HEBcoeffs__' + self.environment + "__rew_" + str(
-                                       int(rew_)) + '__' + self.hebb_rule + "__init_" + str(
-                                       self.init_weights) + "__pop_" + str(
-                                       self.POPULATION_SIZE) + '__coevolved_initial_weights' + "__{}.dat".format(
-                                       iteration))
-                    elif self.pixel_env:
-                        torch.save(self.get_coevolved_parameters(),
-                                   path + "/" + id_ + '/HEBcoeffs__' + self.environment + "__rew_" + str(
-                                       int(rew_)) + '__' + self.hebb_rule + "__init_" + str(
-                                       self.init_weights) + "__pop_" + str(
-                                       self.POPULATION_SIZE) + '__CNN_parameters' + "__{}.dat".format(iteration))
-
+                if rew_ > 0:
+                    self.save(folder, rew_)
                 generations_rewards.append(rew_)
-                np.save(path + "/" + id_ + '/Fitness_values_' + id_ + '_' + self.environment + '.npy',
-                        np.array(generations_rewards).astype(np.float32))
+                # np.save(path + "/" + dt_str + '/Fitness_values_' + dt_str + '_' + self.environment + '.npy',
+                #         np.array(generations_rewards).astype(np.float32))
 
         if pool is not None:
             pool.close()
             pool.join()
+
+    def save(self, folder: Path, reward):
+        torch.save(self.get_coeffs(), Path(folder, f'hebb_coeffs_rew_{int(reward)}'))
+        if self.coevolve_init:
+            torch.save(self.get_coevolved_parameters(), Path(folder, f'coevolved_initial_weights_rew_{int(reward)}'))
+        elif self.pixel_env:
+            torch.save(self.get_coevolved_parameters(), Path(folder, f'CNN_weights_rew_{int(reward)}'))
