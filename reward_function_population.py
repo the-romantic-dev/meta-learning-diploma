@@ -201,8 +201,8 @@ def batch_fitness_hebb(
             # For obaservation ∈ gym.spaces.Discrete, we one-hot encode the observation
             if isinstance(envs[0].observation_space, Discrete):
                 observations = [(obs == torch.arange(envs[0].observation_space.n)).float() for obs in observations]
-
-            policies_outputs_func = lambda: [list(p([observations[i]])) for i, p in enumerate(population_policies)]
+            curr_policies = [p for i, p in enumerate(population_policies) if curr_envs_flags[i]]
+            policies_outputs_func = lambda: [list(p([observations[i]])) for i, p in enumerate(curr_policies)]
             policies_outputs = spinner_and_time(policies_outputs_func, 'Получение выходов нейронов моделей')
             policies_outputs = [torch.stack(grouped) for grouped in list(zip(*policies_outputs))]
 

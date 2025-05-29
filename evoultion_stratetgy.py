@@ -1,7 +1,5 @@
 from datetime import timedelta, datetime
 from pathlib import Path
-from turtledemo.penrose import start
-
 import torch
 import numpy as np
 import multiprocessing as mp

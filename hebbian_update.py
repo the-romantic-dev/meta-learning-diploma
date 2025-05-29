@@ -18,7 +18,7 @@ def hebbian_update(heb_rule: str,
         w = w.to(device)
         popsize, out_dim, in_dim = w.shape
         block_size = out_dim * in_dim
-        coeffs = heb_coeffs[:, offset:offset + block_size, :].permute(2, 0, 1)
+        coeffs = heb_coeffs[:, offset:offset + block_size, :].permute(2, 0, 1).to(device)
         coeffs = coeffs.reshape(coeffs.shape[0], coeffs.shape[1], out_dim, in_dim)
         o_in = outputs[z + 1].to(device).unsqueeze(2)
         o_out = outputs[z].to(device).unsqueeze(1)
