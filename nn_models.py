@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -40,8 +41,7 @@ class CNN_heb(nn.Module):
 
     def forward(self, ob):
 
-        state = torch.as_tensor(ob.copy())
-        state = state.float()
+        state = torch.as_tensor(np.array(ob.copy())).float()
 
         x1 = self.pool(torch.tanh(self.conv1(state)))
         x2 = self.pool(torch.tanh(self.conv2(x1)))

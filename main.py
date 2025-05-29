@@ -2,6 +2,7 @@ import time
 from dataclasses import dataclass
 
 from evoultion_stratetgy import EvolutionStrategyHebb
+from visual import spinner_and_time
 
 
 @dataclass
@@ -35,14 +36,15 @@ if __name__ == '__main__':
         folder='hebb_coeffs',
         distribution='normal'
     )
-    print('\n\n........................................................................')
-    print('\nInitilisating Hebbian ES for ' + config.environment + ' with ' + config.hebb_rule + ' Hebbian rule\n')
-    es = EvolutionStrategyHebb(config)
+    print(f'Среда: {config.environment}')
+    print(f'Правило Хебба: {config.hebb_rule}')
+    print(f'Размер популяции: {config.popsize}')
+    print(f'Количество поколений: {config.generations}')
 
+    es = spinner_and_time(lambda: EvolutionStrategyHebb(config), 'Инициализация эволюционной стратегии')
     # Start the evolution
-    print('\n........................................................................')
-    print('\n ♪┏(°.°)┛┗(°.°)┓ Starting Evolution ┗(°.°)┛┏(°.°)┓ ♪ \n')
-    tic = time.time()
+    print('\n ♪┏(°.°)┛┗(°.°)┓ Запуск эволюционной стратегии ┗(°.°)┛┏(°.°)┓ ♪ \n')
+    start = time.time()
     es.run(config.generations, print_step=config.print_every, path=config.folder)
-    toc = time.time()
-    print('\nEvolution took: ', int(toc - tic), ' seconds\n')
+    end = time.time()
+    print(f'\nЭволюция заняла: {end - start:.2f} сек\n')

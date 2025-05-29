@@ -75,7 +75,11 @@ def init_policy_weights(init_weights_type, is_pixel_env, policy, initial_weights
             list(policy.parameters())[1].data = cnn_weights2.reshape((8,6,5,5))
     return policy.float()
 
-def fitness_hebb(hebb_rule : str, environment : str, init_weights_type = 'uni' , *evolved_parameters: List[np.array]) -> float:
+def fitness_hebb(
+        hebb_rule: str,
+        environment : str,
+        init_weights_type = 'uni' ,
+        *evolved_parameters: List[np.array]) -> float:
     """
     Evaluate an agent 'evolved_parameters' controlled by a Hebbian network in an environment 'environment' during a lifetime.
     The initial weights are either co-evolved (if 'init_weights' == 'coevolve') along with the Hebbian coefficients or randomly sampled at each episode from the 'init_weights' distribution.
