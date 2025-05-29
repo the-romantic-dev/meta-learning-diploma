@@ -114,6 +114,25 @@ def update_policies_weights(pixel_env: bool, population_policies, population_wei
             weights.copy_(new_policy_weights[layer])
             layer += 1
 
+def adapt_observations(observations, envs: list[gym.Env], pixel_env: bool):
+    if isinstance(envs[0].observation_space, Discrete):
+        return [(obs == torch.arange(envs[0].observation_space.n)).float() for obs in observations]
+    if pixel_env:
+        return np.swapaxes(observations, 3, 1)
+    return observations
+
+
+def get_policies_outputs(population_policies, curr_envs_flags, observations, environment):
+    curr_policies = [p for i, p in enumerate(population_policies) if curr_envs_flags[i]]
+    policies_outputs_func = lambda: [list(p([observations[i]])) for i, p in enumerate(curr_policies)]
+    policies_outputs = spinner_and_time(policies_outputs_func, 'Получение выходов нейронов моделей')
+    if 'AntBulletEnv' in environment:
+        policies_outputs[3] = torch.tanh(policies_outputs[3])
+    return [torch.stack(grouped) for grouped in list(zip(*policies_outputs))]
+
+def calc_actions(policies_outputs, environment):
+    return spinner_and_time(lambda: get_action(environment, model_out=policies_outputs[3]), 'Рассчет действий')
+
 def fitness_hebb(
         hebb_rule: str,
         environment: str,
@@ -137,6 +156,21 @@ def fitness_hebb(
         rewards[start_index:end_index] = rew
     return rewards
 
+def make_env_step(envs, actions, curr_envs_flags, environment):
+    curr_envs = [env for env, flag in zip(envs, curr_envs_flags) if flag]
+    results = spinner_and_time(lambda: [env.step(action) for env, action in zip(curr_envs, actions)], 'Шаг симуляции')
+    observations, rewards, terminateds, truncateds, _ = list([np.array(res) for res in zip(*results)])
+
+    dones = terminateds | truncateds
+    expanded_dones = np.zeros_like(curr_envs_flags, dtype=bool)
+    expanded_dones[curr_envs_flags == 1] = dones
+
+    if 'AntBulletEnv' in environment:
+        rewards = [env.unwrapped.rewards[1] for env in curr_envs]  # Distance walked
+
+    expanded_rewards = np.zeros_like(curr_envs_flags, dtype=float)
+    expanded_rewards[curr_envs_flags == 1] = rewards
+    return observations, expanded_rewards, expanded_dones
 
 def batch_fitness_hebb(
         hebb_rule: str,
@@ -177,7 +211,7 @@ def batch_fitness_hebb(
         # vec_env = SyncVectorEnv([lambda: env for env in envs])
         # observations = spinner_and_time(lambda: [env.reset()[0] for env in envs], 'Получение первичных observations')
         observations = spinner_and_time(lambda: np.array([env.reset()[0] for env in envs]), 'Получение первичных observations')
-        observations = observations if not pixel_env else np.swapaxes(observations, 1, 3)  # (3, 84, 84)
+        # observations = observations if not pixel_env else np.swapaxes(observations, 1, 3)  # (3, 84, 84)
 
         # Burnout phase for the bullet quadruped so it starts off from the floor
         if 'Bullet' in environment:
@@ -190,62 +224,40 @@ def batch_fitness_hebb(
 
         # Inner loop
         neg_count = 0
-        rew_ep = np.zeros(population_size)
+        cumulative_rewards = np.zeros(population_size)
         t = 0
         curr_envs_flags = np.ones(population_size)
         neg_count = np.zeros(population_size)
         step = 0
+        neg_count_threshold = 20 if 'CarRacing' in environment else 30
+        observations = adapt_observations(observations, envs, pixel_env)
         while True:
             step += 1
             print(f'Шаг № {step}')
-            # For obaservation ∈ gym.spaces.Discrete, we one-hot encode the observation
-            if isinstance(envs[0].observation_space, Discrete):
-                observations = [(obs == torch.arange(envs[0].observation_space.n)).float() for obs in observations]
-            curr_policies = [p for i, p in enumerate(population_policies) if curr_envs_flags[i]]
-            policies_outputs_func = lambda: [list(p([observations[i]])) for i, p in enumerate(curr_policies)]
-            policies_outputs = spinner_and_time(policies_outputs_func, 'Получение выходов нейронов моделей')
-            policies_outputs = [torch.stack(grouped) for grouped in list(zip(*policies_outputs))]
-
-            if 'AntBulletEnv' in environment:
-                policies_outputs[3] = torch.tanh(policies_outputs[3])
-
-            # Bounding the action space
-            curr_envs = [env for env, flag in zip(envs, curr_envs_flags) if flag]
-            actions = spinner_and_time(lambda: get_action(environment, model_out=policies_outputs[3]), 'Рассчет действий')
-            results = spinner_and_time(lambda: [env.step(action) for env, action in zip(curr_envs, actions)], 'Шаг симуляции')
-            observations, rewards, terminateds, truncateds, _ = list([np.array(res) for res in zip(*results)])
-
-            # observations, rewards, terminateds, truncateds, _ = spinner_and_time(lambda: vec_env.step(actions), 'Шаг симуляции')
-            dones = terminateds | truncateds
-            expanded_dones = np.zeros_like(curr_envs_flags, dtype=bool)
-            expanded_dones[curr_envs_flags == 1] = dones
-
-            if 'AntBulletEnv' in environment:
-                rewards = [env.unwrapped.rewards[1] for env in curr_envs]  # Distance walked
-
-            expanded_rewards = np.zeros_like(curr_envs_flags, dtype=float)
-            expanded_rewards[curr_envs_flags == 1] = rewards
-            rew_ep += expanded_rewards
-
-            # env.render('human') # Gym envs
-
-            if pixel_env:
-                observations = np.swapaxes(observations, 3, 1)  # (3, 84, 84)
-
+            # observations = adapt_observations(observations, envs, pixel_env)
+            curr_observations = observations[curr_envs_flags.astype(bool)]
+            policies_outputs = get_policies_outputs(population_policies, curr_envs_flags, curr_observations, environment)
+            actions = calc_actions(policies_outputs, environment)
+            curr_observations, expanded_rewards, expanded_dones = make_env_step(envs, actions, curr_envs_flags, environment)
+            curr_observations = adapt_observations(curr_observations, envs, pixel_env)
+            observations[curr_envs_flags.astype(bool)] = curr_observations
+            cumulative_rewards += expanded_rewards
             neg_count += neg_count_add(expanded_rewards, environment, t)
-            neg_count_threshold = 20 if 'CarRacing' in environment else 30
-
             curr_envs_flags = (~((curr_envs_flags == 0) | expanded_dones | (neg_count > neg_count_threshold))).astype(int)
 
             if sum(curr_envs_flags) == 0:
                 print(f'Количество активных сред: {sum(curr_envs_flags)}')
                 break
 
-            t += 1
-
-            update_func = lambda: hebbian_update(hebb_rule, population_hebb_coeffs, population_weights, policies_outputs)
+            curr_policies_outputs = [p[curr_envs_flags.astype(bool)] for p in policies_outputs]
+            curr_hebb_coeffs = population_hebb_coeffs[curr_envs_flags.astype(bool)]
+            curr_population_weights = [p[curr_envs_flags.astype(bool)] for p in population_weights]
+            update_func = lambda: hebbian_update(hebb_rule, curr_hebb_coeffs, curr_population_weights, curr_policies_outputs)
             #### Episodic/Intra-life hebbian update of the weights
-            population_weights = spinner_and_time(update_func, 'Обновление весов правил Хебба')
+            curr_population_weights = spinner_and_time(update_func, 'Обновление весов правил Хебба')
+
+            for i, p in enumerate(population_weights):
+                p[curr_envs_flags.astype(bool)] = curr_population_weights[i]
 
             spinner_and_time(
                 lambda: update_policies_weights(pixel_env, population_policies, population_weights),
@@ -261,8 +273,7 @@ def batch_fitness_hebb(
                     for i in indices:
                         p = params[i]
                         p.data /= p.abs().max()
-
-        # env.close()
+            t += 1
         for env in envs:
             env.close()
-    return rew_ep
+    return cumulative_rewards
