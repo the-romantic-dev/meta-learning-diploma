@@ -122,9 +122,8 @@ def adapt_observations(observations, envs: list[gym.Env], pixel_env: bool):
     return observations
 
 
-def get_policies_outputs(population_policies, curr_envs_flags, observations, environment):
-    curr_policies = [p for i, p in enumerate(population_policies) if curr_envs_flags[i]]
-    policies_outputs_func = lambda: [list(p([observations[i]])) for i, p in enumerate(curr_policies)]
+def get_policies_outputs(population_policies, observations, environment):
+    policies_outputs_func = lambda: [list(p([observations[i]])) for i, p in enumerate(population_policies)]
     policies_outputs = spinner_and_time(policies_outputs_func, 'Получение выходов нейронов моделей')
     if 'AntBulletEnv' in environment:
         policies_outputs[3] = torch.tanh(policies_outputs[3])
@@ -156,21 +155,18 @@ def fitness_hebb(
         rewards[start_index:end_index] = rew
     return rewards
 
-def make_env_step(envs, actions, curr_envs_flags, environment):
-    curr_envs = [env for env, flag in zip(envs, curr_envs_flags) if flag]
-    results = spinner_and_time(lambda: [env.step(action) for env, action in zip(curr_envs, actions)], 'Шаг симуляции')
+def make_env_step(envs, actions, environment):
+    results = spinner_and_time(lambda: [env.step(action) for env, action in zip(envs, actions)], 'Шаг симуляции')
     observations, rewards, terminateds, truncateds, _ = list([np.array(res) for res in zip(*results)])
 
     dones = terminateds | truncateds
-    expanded_dones = np.zeros_like(curr_envs_flags, dtype=bool)
-    expanded_dones[curr_envs_flags == 1] = dones
+    # expanded_dones = np.zeros_like(curr_envs_flags, dtype=bool)
+    # expanded_dones[curr_envs_flags == 1] = dones
 
     if 'AntBulletEnv' in environment:
-        rewards = [env.unwrapped.rewards[1] for env in curr_envs]  # Distance walked
+        rewards = [env.unwrapped.rewards[1] for env in envs]  # Distance walked
 
-    expanded_rewards = np.zeros_like(curr_envs_flags, dtype=float)
-    expanded_rewards[curr_envs_flags == 1] = rewards
-    return observations, expanded_rewards, expanded_dones
+    return observations, rewards, dones
 
 def batch_fitness_hebb(
         hebb_rule: str,
@@ -223,8 +219,8 @@ def batch_fitness_hebb(
         normalised_weights = ('Bullet' not in environment)
 
         # Inner loop
-        neg_count = 0
         cumulative_rewards = np.zeros(population_size)
+        population_indices = np.array(range(population_size))
         t = 0
         curr_envs_flags = np.ones(population_size)
         neg_count = np.zeros(population_size)
@@ -234,35 +230,45 @@ def batch_fitness_hebb(
         while True:
             step += 1
             print(f'Шаг № {step}')
-            # observations = adapt_observations(observations, envs, pixel_env)
-            curr_observations = observations[curr_envs_flags.astype(bool)]
-            policies_outputs = get_policies_outputs(population_policies, curr_envs_flags, curr_observations, environment)
-            actions = calc_actions(policies_outputs, environment)
-            curr_observations, expanded_rewards, expanded_dones = make_env_step(envs, actions, curr_envs_flags, environment)
-            curr_observations = adapt_observations(curr_observations, envs, pixel_env)
-            observations[curr_envs_flags.astype(bool)] = curr_observations
-            cumulative_rewards += expanded_rewards
-            neg_count += neg_count_add(expanded_rewards, environment, t)
-            curr_envs_flags = (~((curr_envs_flags == 0) | expanded_dones | (neg_count > neg_count_threshold))).astype(int)
 
+            # Выполнить шаг среды для активных сред
+            policies_outputs = get_policies_outputs(population_policies, observations, environment)
+            actions = calc_actions(policies_outputs, environment)
+
+            observations, rewards, dones = make_env_step(envs, actions, environment)
+            observations = adapt_observations(observations, envs, pixel_env)
+
+            # Добавить награды и посчитать негативные
+            cumulative_rewards[population_indices] += rewards
+            neg_count[population_indices] += neg_count_add(rewards, environment, t)
+
+            # Обновляем флаги активных сред
+            curr_envs_flags = (~(dones | (neg_count[population_indices] > neg_count_threshold))).astype(int)
+            curr_envs_flags[0] = 0
+            population_indices = population_indices[curr_envs_flags.astype(bool)]
             if sum(curr_envs_flags) == 0:
                 print(f'Количество активных сред: {sum(curr_envs_flags)}')
                 break
 
-            curr_policies_outputs = [p[curr_envs_flags.astype(bool)] for p in policies_outputs]
-            curr_hebb_coeffs = population_hebb_coeffs[curr_envs_flags.astype(bool)]
-            curr_population_weights = [p[curr_envs_flags.astype(bool)] for p in population_weights]
-            update_func = lambda: hebbian_update(hebb_rule, curr_hebb_coeffs, curr_population_weights, curr_policies_outputs)
-            #### Episodic/Intra-life hebbian update of the weights
-            curr_population_weights = spinner_and_time(update_func, 'Обновление весов правил Хебба')
+            # Обновляем списки активных сред, политик этих сред и observations
+            population_policies = [pp for i, pp in enumerate(population_policies) if curr_envs_flags[i]]
+            observations = observations[curr_envs_flags.astype(bool)]
+            envs = [env for env, flag in zip(envs, curr_envs_flags) if flag]
+            policies_outputs = [p[curr_envs_flags.astype(bool)] for p in policies_outputs]
+            population_hebb_coeffs = population_hebb_coeffs[curr_envs_flags.astype(bool)]
+            population_weights = [p[curr_envs_flags.astype(bool)] for p in population_weights]
 
-            for i, p in enumerate(population_weights):
-                p[curr_envs_flags.astype(bool)] = curr_population_weights[i]
-
+            # Обновляем веса с помощью локальных правил Хебба
+            update_func = lambda: hebbian_update(hebb_rule, population_hebb_coeffs, population_weights, policies_outputs)
+            population_weights = spinner_and_time(update_func, 'Обновление весов правил Хебба')
             spinner_and_time(
                 lambda: update_policies_weights(pixel_env, population_policies, population_weights),
                 'Обновление весов моделей'
             )
+            # for i, p in enumerate(population_weights):
+            #     p[curr_envs_flags.astype(bool)] = curr_population_weights[i]
+
+
             print(f'Количество активных сред: {sum(curr_envs_flags)}')
             print('\n')
             # Normalise weights per layer
