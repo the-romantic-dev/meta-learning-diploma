@@ -3,13 +3,17 @@ from pathlib import Path
 import imageio
 import torch
 import numpy as np
+from tqdm import tqdm
 from gymnasium.spaces import Discrete, Box
 import gymnasium as gym
 import os
 from gymnasium import wrappers as w
 import torch.nn as nn
-from typing import List
+import imageio_ffmpeg
 
+# Установить уровень логирования imageio_ffmpeg на ERROR (или выше)
+import logging
+logging.getLogger('imageio_ffmpeg').setLevel(logging.ERROR)
 from hebbian_update import hebbian_update
 from nn_models import CNN_heb, MLP_heb
 from visual import spinner_and_time
@@ -134,16 +138,24 @@ def adapt_observations(observations, envs: list[gym.Env], pixel_env: bool):
 
 
 def get_policies_outputs(population_policies, observations, environment):
-    policies_outputs_func = lambda: [list(p([observations[i]])) for i, p in enumerate(population_policies)]
-    policies_outputs = spinner_and_time(policies_outputs_func, 'Получение выходов нейронов моделей')
+    policies_outputs = [list(p([observations[i]])) for i, p in enumerate(population_policies)]
     if 'AntBulletEnv' in environment:
         policies_outputs[3] = torch.tanh(policies_outputs[3])
     return [torch.stack(grouped) for grouped in list(zip(*policies_outputs))]
 
 
 def calc_actions(policies_outputs, environment):
-    return spinner_and_time(lambda: get_action(environment, model_out=policies_outputs[3]), 'Рассчет действий')
+    return get_action(environment, model_out=policies_outputs[3])
 
+def make_env_step(envs, actions, environment):
+    results = [env.step(action) for env, action in zip(envs, actions)]
+    observations, rewards, terminateds, truncateds, _ = list([np.array(res) for res in zip(*results)])
+    dones = terminateds | truncateds
+
+    if 'AntBulletEnv' in environment:
+        rewards = [env.unwrapped.rewards[1] for env in envs]  # Distance walked
+
+    return observations, rewards, dones
 
 def fitness_hebb(
         iteration: int,
@@ -172,18 +184,7 @@ def fitness_hebb(
     return rewards
 
 
-def make_env_step(envs, actions, environment):
-    results = spinner_and_time(lambda: [env.step(action) for env, action in zip(envs, actions)], 'Шаг симуляции')
-    observations, rewards, terminateds, truncateds, _ = list([np.array(res) for res in zip(*results)])
 
-    dones = terminateds | truncateds
-    # expanded_dones = np.zeros_like(curr_envs_flags, dtype=bool)
-    # expanded_dones[curr_envs_flags == 1] = dones
-
-    if 'AntBulletEnv' in environment:
-        rewards = [env.unwrapped.rewards[1] for env in envs]  # Distance walked
-
-    return observations, rewards, dones
 
 
 def batch_fitness_hebb(
@@ -225,11 +226,8 @@ def batch_fitness_hebb(
         population_weights = [torch.stack(elem) for elem in zip(*population_weights)]
         if pixel_env:
             population_weights = population_weights[2:]
-        # vec_env = SyncVectorEnv([lambda: env for env in envs])
-        # observations = spinner_and_time(lambda: [env.reset()[0] for env in envs], 'Получение первичных observations')
         observations = spinner_and_time(lambda: np.array([env.reset()[0] for env in envs]),
                                         'Получение первичных observations')
-        # observations = observations if not pixel_env else np.swapaxes(observations, 1, 3)  # (3, 84, 84)
 
         # Burnout phase for the bullet quadruped so it starts off from the floor
         if 'Bullet' in environment:
@@ -250,9 +248,9 @@ def batch_fitness_hebb(
         neg_count_threshold = 20 if 'CarRacing' in environment else 30
         observations = adapt_observations(observations, envs, pixel_env)
         frames = [[] for _ in range(population_size)]
+        pbar = tqdm(desc=f"Рассчет популяции поколения {iteration + 1}")
         while True:
             step += 1
-            print(f'Шаг № {step}')
 
             # Выполнить шаг среды для активных сред
             policies_outputs = get_policies_outputs(population_policies, observations, environment)
@@ -274,7 +272,8 @@ def batch_fitness_hebb(
             # curr_envs_flags[0] = 0
             population_indices = population_indices[curr_envs_flags.astype(bool)]
             if sum(curr_envs_flags) == 0:
-                print(f'Количество активных сред: {sum(curr_envs_flags)}')
+                pbar.set_postfix({'Количество активных сред': sum(curr_envs_flags)})
+                pbar.update(1)
                 break
 
             # Обновляем списки активных сред, политик этих сред и observations
@@ -284,41 +283,14 @@ def batch_fitness_hebb(
             policies_outputs = [p[curr_envs_flags.astype(bool)] for p in policies_outputs]
             population_hebb_coeffs = population_hebb_coeffs[curr_envs_flags.astype(bool)]
             population_weights = [p[curr_envs_flags.astype(bool)] for p in population_weights]
-            get_pp = lambda: [p.detach().cpu().numpy().copy() for p in population_policies[0].parameters()]
-            compare = lambda a, b: all(np.array_equal(ai, bi) for ai, bi in zip(a, b))
-            pp = get_pp()
-            print(f"params check eq: {compare(pp, get_pp())}")
-            pp_ch = get_pp()
-            pp_ch[0][0][0][0][0] = -111
-            print(f"params check ineq: {compare(pp_ch, get_pp())}")
-            # print(f"params check: {pp == get_pp()}")
-            # Обновляем веса с помощью локальных правил Хебба
-            update_func = lambda: hebbian_update(hebb_rule, population_hebb_coeffs, population_weights,
-                                                 policies_outputs)
-            population_weights = spinner_and_time(update_func, 'Обновление весов правил Хебба')
-            print(f"Изменились ли веса после hebb_update: {not compare(pp, get_pp())}")
-            pp = get_pp()
-            spinner_and_time(
-                lambda: update_policies_weights(pixel_env, population_policies, population_weights),
-                'Обновление весов моделей'
-            )
-            print(f"Изменились ли веса после update_policies: {not compare(pp, get_pp())}")
-            pp = get_pp()
-            # for i, p in enumerate(population_weights):
-            #     p[curr_envs_flags.astype(bool)] = curr_population_weights[i]
-            # envs[0].render()
-
-            print(f'Количество активных сред: {sum(curr_envs_flags)}')
-            print('\n')
-            # Normalise weights per layer
+            population_weights = hebbian_update(hebb_rule, population_hebb_coeffs, population_weights, policies_outputs)
             if normalised_weights:
-                for policy in population_policies:
-                    params = list(policy.parameters())
-                    indices = (0, 1, 2) if not pixel_env else (2, 3, 4)
-                    for i in indices:
-                        p = params[i]
-                        p.data /= p.abs().max()
-            print(f"Изменились ли веса после нормализации: {not compare(pp, get_pp())}")
+              for weight in population_weights:
+                for i in range(len(envs)):
+                  weight[i] /= weight[i].abs().max()
+            update_policies_weights(pixel_env, population_policies, population_weights)
+            pbar.set_postfix({'Количество активных сред': sum(curr_envs_flags)})
+            pbar.update(1)
             t += 1
         for env in envs:
             env.close()
