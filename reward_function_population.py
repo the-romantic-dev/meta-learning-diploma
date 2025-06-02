@@ -91,22 +91,21 @@ def init_policy_weights(init_weights_type: str, is_pixel_env: bool, policy: CNN_
 
 
 def get_action(env_name: str, model_out: torch.Tensor):
-    return model_out.numpy()
     if 'CarRacing' in env_name:
         model_out = model_out.t()
         actions = torch.stack([torch.tanh(model_out[0]), torch.sigmoid(model_out[1]), torch.sigmoid(model_out[2])])
         return actions.t().numpy()
     elif 'AntBulletEnv' in env_name:
-        return outputs[3].numpy()
+        return model_out.numpy()
     else:
         raise ValueError(f"Incorrect env_name {env_name}")
 
 
-def neg_count_add(expanded_rewards, environment, t):
+def neg_count_add(curr_negs: np.ndarray, rewards: np.ndarray, environment, t):
     if 'AntBulletEnv' in environment and t <= 200:
-        return np.zeros(len(expanded_rewards))
-    return (expanded_rewards < 0.0).astype(int)
-
+        return np.zeros(len(rewards))
+    adds = (rewards < 0.0).astype(int)
+    return curr_negs * (rewards < 0.0).astype(int) + adds
 
 def update_policies_weights(pixel_env: bool, population_policies, population_weights):
     for i, policy in enumerate(population_policies):
@@ -268,7 +267,7 @@ def batch_fitness_hebb(
 
             # Добавить награды и посчитать негативные
             cumulative_rewards[population_indices] += rewards
-            neg_count[population_indices] += neg_count_add(rewards, environment, t)
+            neg_count[population_indices] = neg_count_add(neg_count[population_indices], rewards, environment, t)
 
             # Обновляем флаги активных сред
             curr_envs_flags = (~(dones | (neg_count[population_indices] > neg_count_threshold))).astype(int)
