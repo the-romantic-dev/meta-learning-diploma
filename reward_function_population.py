@@ -1,8 +1,11 @@
+from pathlib import Path
+
+import imageio
 import torch
 import numpy as np
 from gymnasium.spaces import Discrete, Box
 import gymnasium as gym
-
+import os
 from gymnasium import wrappers as w
 import torch.nn as nn
 from typing import List
@@ -12,6 +15,9 @@ from nn_models import CNN_heb, MLP_heb
 from visual import spinner_and_time
 from wrappers import FireEpisodicLifeEnv, ScaledFloatFrame
 from gymnasium.vector import SyncVectorEnv
+import time
+from IPython import display
+from PIL import Image
 
 
 def _weights_init(m, init_weights):
@@ -39,7 +45,8 @@ def _weights_init(m, init_weights):
 
 
 def make_envs(env_name: str, population_size: int) -> tuple[gym.Env, bool, int, int]:
-    envs = [gym.make(env_name, verbose=0) for _ in range(population_size)]
+    envs = [gym.make(env_name, verbose=0, render_mode='rgb_array') for _ in range(population_size)]
+    # envs[0] = gym.make(env_name, verbose=0, render_mode='human')
     if hasattr(envs[0].unwrapped, 'get_action_meanings') and 'FIRE' in envs[0].unwrapped.get_action_meanings():
         envs = [FireEpisodicLifeEnv(env) for env in envs]
     shape = envs[0].observation_space.shape
@@ -84,6 +91,7 @@ def init_policy_weights(init_weights_type: str, is_pixel_env: bool, policy: CNN_
 
 
 def get_action(env_name: str, model_out: torch.Tensor):
+    return model_out.numpy()
     if 'CarRacing' in env_name:
         model_out = model_out.t()
         actions = torch.stack([torch.tanh(model_out[0]), torch.sigmoid(model_out[1]), torch.sigmoid(model_out[2])])
@@ -101,18 +109,22 @@ def neg_count_add(expanded_rewards, environment, t):
 
 
 def update_policies_weights(pixel_env: bool, population_policies, population_weights):
-    population_size = len(population_policies)
-    for i in range(population_size):
-        policy = population_policies[i]
-        new_policy_weights = [p[i] for p in population_weights]
-        layer = 0
-        skips = 2 if pixel_env else 0
-        for weights in policy.parameters():
-            if skips:
-                skips -= 1
-                continue
-            weights.copy_(new_policy_weights[layer])
-            layer += 1
+    for i, policy in enumerate(population_policies):
+        # Собираем в список тензоры с новыми весами для текущей политики
+        new_weights = [p[i] for p in population_weights]
+
+        # Берём именно те параметры, которые хотим перезаписать
+        # (здесь вы, судя по коду, пропускаете первые два параметра по задумке)
+        params = list(policy.parameters())[2:]
+
+        # Меняем значения параметров без отслеживания градиентов
+        with torch.no_grad():
+            for p_tensor, new_w in zip(params, new_weights):
+                # Убеждаемся, что новый тензор на том же устройстве и имеет ту же форму
+                new_w = new_w.to(p_tensor.device)
+                # Классический приём: пишем прямо в .data
+                p_tensor.data.copy_(new_w)
+
 
 def adapt_observations(observations, envs: list[gym.Env], pixel_env: bool):
     if isinstance(envs[0].observation_space, Discrete):
@@ -129,10 +141,14 @@ def get_policies_outputs(population_policies, observations, environment):
         policies_outputs[3] = torch.tanh(policies_outputs[3])
     return [torch.stack(grouped) for grouped in list(zip(*policies_outputs))]
 
+
 def calc_actions(policies_outputs, environment):
     return spinner_and_time(lambda: get_action(environment, model_out=policies_outputs[3]), 'Рассчет действий')
 
+
 def fitness_hebb(
+        iteration: int,
+        folder: Path,
         hebb_rule: str,
         environment: str,
         init_weights_type='uni',
@@ -148,12 +164,14 @@ def fitness_hebb(
         if end_index > population_size:
             end_index = population_size
         rew = batch_fitness_hebb(
+            iteration, folder,
             hebb_rule, environment, init_weights_type,
             population_hebb_coeffs[start_index:end_index],
             population_initial_weights_co[start_index:end_index]
         )
         rewards[start_index:end_index] = rew
     return rewards
+
 
 def make_env_step(envs, actions, environment):
     results = spinner_and_time(lambda: [env.step(action) for env, action in zip(envs, actions)], 'Шаг симуляции')
@@ -168,7 +186,10 @@ def make_env_step(envs, actions, environment):
 
     return observations, rewards, dones
 
+
 def batch_fitness_hebb(
+        iteration: int,
+        folder: Path,
         hebb_rule: str,
         environment: str,
         init_weights_type='uni',
@@ -186,7 +207,8 @@ def batch_fitness_hebb(
     population_hebb_coeffs = torch.from_numpy(np.array(population_hebb_coeffs))
     print(f'Размер батча: {population_size}')
     with torch.no_grad():
-        envs, pixel_env, input_dim, action_dim = spinner_and_time(lambda: make_envs(environment, population_size), 'Инициализация среды для каждого члена популяции')
+        envs, pixel_env, input_dim, action_dim = spinner_and_time(lambda: make_envs(environment, population_size),
+                                                                  'Инициализация среды для каждого члена популяции')
         population_policies_func = lambda: [
             init_policy_weights(
                 init_weights_type,
@@ -206,7 +228,8 @@ def batch_fitness_hebb(
             population_weights = population_weights[2:]
         # vec_env = SyncVectorEnv([lambda: env for env in envs])
         # observations = spinner_and_time(lambda: [env.reset()[0] for env in envs], 'Получение первичных observations')
-        observations = spinner_and_time(lambda: np.array([env.reset()[0] for env in envs]), 'Получение первичных observations')
+        observations = spinner_and_time(lambda: np.array([env.reset()[0] for env in envs]),
+                                        'Получение первичных observations')
         # observations = observations if not pixel_env else np.swapaxes(observations, 1, 3)  # (3, 84, 84)
 
         # Burnout phase for the bullet quadruped so it starts off from the floor
@@ -227,6 +250,7 @@ def batch_fitness_hebb(
         step = 0
         neg_count_threshold = 20 if 'CarRacing' in environment else 30
         observations = adapt_observations(observations, envs, pixel_env)
+        frames = [[] for _ in range(population_size)]
         while True:
             step += 1
             print(f'Шаг № {step}')
@@ -236,6 +260,10 @@ def batch_fitness_hebb(
             actions = calc_actions(policies_outputs, environment)
 
             observations, rewards, dones = make_env_step(envs, actions, environment)
+            curr_frames = [env.render() for env in envs]
+            for i, curr_i in zip(population_indices, range(len(curr_frames))):
+                frames[i].append(curr_frames[curr_i
+                                 ])
             observations = adapt_observations(observations, envs, pixel_env)
 
             # Добавить награды и посчитать негативные
@@ -244,7 +272,7 @@ def batch_fitness_hebb(
 
             # Обновляем флаги активных сред
             curr_envs_flags = (~(dones | (neg_count[population_indices] > neg_count_threshold))).astype(int)
-            curr_envs_flags[0] = 0
+            # curr_envs_flags[0] = 0
             population_indices = population_indices[curr_envs_flags.astype(bool)]
             if sum(curr_envs_flags) == 0:
                 print(f'Количество активных сред: {sum(curr_envs_flags)}')
@@ -257,17 +285,29 @@ def batch_fitness_hebb(
             policies_outputs = [p[curr_envs_flags.astype(bool)] for p in policies_outputs]
             population_hebb_coeffs = population_hebb_coeffs[curr_envs_flags.astype(bool)]
             population_weights = [p[curr_envs_flags.astype(bool)] for p in population_weights]
-
+            get_pp = lambda: [p.detach().cpu().numpy().copy() for p in population_policies[0].parameters()]
+            compare = lambda a, b: all(np.array_equal(ai, bi) for ai, bi in zip(a, b))
+            pp = get_pp()
+            print(f"params check eq: {compare(pp, get_pp())}")
+            pp_ch = get_pp()
+            pp_ch[0][0][0][0][0] = -111
+            print(f"params check ineq: {compare(pp_ch, get_pp())}")
+            # print(f"params check: {pp == get_pp()}")
             # Обновляем веса с помощью локальных правил Хебба
-            update_func = lambda: hebbian_update(hebb_rule, population_hebb_coeffs, population_weights, policies_outputs)
+            update_func = lambda: hebbian_update(hebb_rule, population_hebb_coeffs, population_weights,
+                                                 policies_outputs)
             population_weights = spinner_and_time(update_func, 'Обновление весов правил Хебба')
+            print(f"Изменились ли веса после hebb_update: {not compare(pp, get_pp())}")
+            pp = get_pp()
             spinner_and_time(
                 lambda: update_policies_weights(pixel_env, population_policies, population_weights),
                 'Обновление весов моделей'
             )
+            print(f"Изменились ли веса после update_policies: {not compare(pp, get_pp())}")
+            pp = get_pp()
             # for i, p in enumerate(population_weights):
             #     p[curr_envs_flags.astype(bool)] = curr_population_weights[i]
-
+            # envs[0].render()
 
             print(f'Количество активных сред: {sum(curr_envs_flags)}')
             print('\n')
@@ -279,7 +319,17 @@ def batch_fitness_hebb(
                     for i in indices:
                         p = params[i]
                         p.data /= p.abs().max()
+            print(f"Изменились ли веса после нормализации: {not compare(pp, get_pp())}")
             t += 1
         for env in envs:
             env.close()
+
+    best_policy_index = np.argmax(cumulative_rewards)
+    folder = Path(folder, 'videos')
+    os.makedirs(folder, exist_ok=True)
+    path = f"{folder}/best_gym_video_iter_{iteration}_rew_{cumulative_rewards[best_policy_index]:.2f}.mp4"
+    writer = imageio.get_writer(path, fps=30)
+    for frame in frames[best_policy_index]:
+        writer.append_data(frame)
+    writer.close()
     return cumulative_rewards

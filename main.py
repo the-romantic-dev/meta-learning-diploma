@@ -1,3 +1,4 @@
+import random
 import time
 from dataclasses import dataclass
 
@@ -41,6 +42,7 @@ if __name__ == '__main__':
     print(f'Размер популяции: {config.popsize}')
     print(f'Количество поколений: {config.generations}')
 
+    random.seed(42)
     es = spinner_and_time(lambda: EvolutionStrategyHebb(config), 'Инициализация эволюционной стратегии')
     # Start the evolution
     print('\n ♪┏(°.°)┛┗(°.°)┓ Запуск эволюционной стратегии ┗(°.°)┛┏(°.°)┓ ♪ \n')

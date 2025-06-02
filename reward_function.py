@@ -36,7 +36,7 @@ def _weights_init(m, init_weights):
             pass
 
 def make_env(env_name: str) -> tuple[gym.Env, bool, int]:
-    env = gym.make(env_name, verbose=0)
+    env = gym.make(env_name, verbose=0, render_mode='human')
     if hasattr(env.unwrapped, 'get_action_meanings') and 'FIRE' in env.unwrapped.get_action_meanings():
         env = FireEpisodicLifeEnv(env)
     shape = env.observation_space.shape
@@ -117,6 +117,7 @@ def fitness_hebb(
         neg_count = 0
         rew_ep = 0
         t = 0
+
         while True:
             # For obaservation ∈ gym.spaces.Discrete, we one-hot encode the observation
             if isinstance(env.observation_space, Discrete):
@@ -151,7 +152,7 @@ def fitness_hebb(
               reward = env.unwrapped.rewards[1] # Distance walked
             rew_ep += reward
 
-            # env.render('human') # Gym envs
+            env.render() # Gym envs
 
             if pixel_env: observation = np.swapaxes(observation,2,0) #(3, 84, 84)
 

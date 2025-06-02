@@ -190,13 +190,13 @@ class EvolutionStrategyHebb(object):
         ]
         return np.array(rewards).astype(np.float32)
 
-    def _get_rewards_coevolved(self, population: np.ndarray, population_coevolved: np.ndarray):
+    def _get_rewards_coevolved(self, iteration: int, folder: Path, population: np.ndarray, population_coevolved: np.ndarray):
         def _get_params_try(w: np.ndarray, p: np.ndarray) -> np.ndarray:
             return w + self.SIGMA * p
 
         heb_coeffs_tries = spinner_and_time(lambda: [_get_params_try(self.coeffs, p) for p in population], 'Генерация heb_coeffs')
         coevolved_parameters_tries = spinner_and_time(lambda: [_get_params_try(self.initial_weights_co, p) for p in population_coevolved], 'Генерация coevolved params')
-        rewards = self.get_reward(
+        rewards = self.get_reward(iteration, folder,
             self.config.hebb_rule, self.config.environment, self.config.init_weights,
             heb_coeffs_tries, coevolved_parameters_tries)
         # for z in tqdm(
@@ -264,7 +264,7 @@ class EvolutionStrategyHebb(object):
             # Evolution of Hebbian coefficients & coevolution of cnn parameters and/or initial weights
             if self.pixel_env or self.coevolve_init:
                 population_coevolved = spinner_and_time(lambda: self._get_population(coevolved=True), 'Генерация coevolved популяции')  # Sample normal noise:         Step 5
-                rewards = self._get_rewards_coevolved(population, population_coevolved)  # Compute population fitness:  Step 6
+                rewards = self._get_rewards_coevolved(iteration, folder, population, population_coevolved)  # Compute population fitness:  Step 6
                 self._update_coeffs(rewards, population)  # Update coefficients:         Steps 8->12
                 self._update_coevolved_param(rewards, population_coevolved)  # Update coevolved parameters: Steps 8->12
             else:
@@ -275,7 +275,7 @@ class EvolutionStrategyHebb(object):
             rew_ = rewards.mean()
             end=time.time()
             diff = end - start
-            print(f'Итерация {iteration + 1} | Награда: {rew_:.2f} | Время: {int(diff) // 3600:02}:{int(diff) % 3600 // 60:02}:{int(diff) % 60}:02')
+            print(f'Итерация {iteration + 1} | Награда (средняя): {rew_:.2f} | Награда (макс.): {rewards.max():.2f} | Время: {int(diff) // 3600:02}:{int(diff) % 3600 // 60:02}:{int(diff) % 60}:02')
             print(f'update_factor: {self.update_factor}  lr: {self.learning_rate} | sum_coeffs: {int(np.sum(self.coeffs))} sum_abs_coeffs: {int(np.sum(abs(self.coeffs)))}')
 
             if rew_ > 0:
