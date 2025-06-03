@@ -13,6 +13,32 @@ from tqdm import tqdm
 from reward_function_population import fitness_hebb
 from visual import spinner_and_time
 
+import psutil, torch, gc, os, tracemalloc
+
+P = psutil.Process(os.getpid())
+tracemalloc_started = False
+
+def mem(tag):
+    global tracemalloc_started
+    if not tracemalloc_started:
+        tracemalloc.start()
+        tracemalloc_started = True
+
+    cpu = P.memory_info().rss / 1024**2
+    snapshot = tracemalloc.take_snapshot()
+    top_stats = snapshot.statistics('lineno')
+    top = top_stats[0] if top_stats else None
+
+    if torch.cuda.is_available():
+        gpu = torch.cuda.memory_allocated() / 1024**2
+        cache = torch.cuda.memory_reserved() / 1024**2
+        print(f"[{tag}]  CPU {cpu:,.0f} MB | GPU {gpu:,.0f}/{cache:,.0f} MB")
+    else:
+        print(f"[{tag}]  CPU {cpu:,.0f} MB")
+
+    if top:
+        print(f"  Top tracemalloc: {top.size / 1024 / 1024:.1f} MB at {top.traceback.format()[-1].strip()}")
+
 
 def compute_ranks(x):
     """
@@ -197,7 +223,7 @@ class EvolutionStrategyHebb(object):
         heb_coeffs_tries = spinner_and_time(lambda: [_get_params_try(self.coeffs, p) for p in population], 'Генерация heb_coeffs')
         coevolved_parameters_tries = spinner_and_time(lambda: [_get_params_try(self.initial_weights_co, p) for p in population_coevolved], 'Генерация coevolved params')
         rewards = self.get_reward(iteration, folder,
-            self.config.hebb_rule, self.config.environment, self.config.init_weights,
+            self.config.hebb_rule, self.config.environment, self.config.save_videos, self.config.init_weights,
             heb_coeffs_tries, coevolved_parameters_tries)
         # for z in tqdm(
         #         range(len(population)),
@@ -244,6 +270,7 @@ class EvolutionStrategyHebb(object):
         #     self.initial_weights_co[index] = w + self.update_factor * np.dot(layer_population.T, rewards).T
 
     def run(self, iterations, print_step=10, path='/content/hebb_coeffs'):
+        mem('start')
         curr_datetime = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H-%M-%S')
         experiment_folder_name = f'{self.environment.split("-")[0]}_{self.hebb_rule}_{self.init_weights}_{self.POPULATION_SIZE}_{iterations}_{self.config.distribution} {curr_datetime}'
         folder = Path(path, experiment_folder_name)
@@ -260,7 +287,8 @@ class EvolutionStrategyHebb(object):
 
         for iteration in range(iterations):  # Algorithm 2. Salimans, 2017: https://arxiv.org/abs/1703.03864
             start = time.time()
-            population = spinner_and_time(self._get_population, 'Генерация популяции')  # Sample normal noise:         Step 5
+            population = spinner_and_time(self._get_population, 'Генерация популяции')
+            mem('generate population')# Sample normal noise:         Step 5
             # Evolution of Hebbian coefficients & coevolution of cnn parameters and/or initial weights
             if self.pixel_env or self.coevolve_init:
                 population_coevolved = spinner_and_time(lambda: self._get_population(coevolved=True), 'Генерация coevolved популяции')  # Sample normal noise:         Step 5
@@ -270,7 +298,7 @@ class EvolutionStrategyHebb(object):
             else:
                 rewards = self._get_rewards(pool, population)  # Compute population fitness:  Step 6
                 self._update_coeffs(rewards, population)  # Update coefficients:         Steps 8->12
-
+            mem('get rewards and update coeffs')
             # Print fitness and save Hebbian coefficients and/or Coevolved / CNNs parameters
             rew_ = rewards.mean()
             end=time.time()

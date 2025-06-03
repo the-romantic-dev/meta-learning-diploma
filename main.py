@@ -20,22 +20,23 @@ class Config:
     threads: int
     folder: str
     distribution: str
-
+    save_videos: bool
 
 if __name__ == '__main__':
     config = Config(
         environment='CarRacing-v3',
         hebb_rule='ABCD_lr',
-        popsize=10,
+        popsize=200,
         lr=0.2,
         decay=0.995,
         sigma=0.1,
         init_weights='uni',
         print_every=1,
-        generations=10,
+        generations=300,
         threads=1,
         folder='hebb_coeffs',
-        distribution='normal'
+        distribution='normal',
+        save_videos=False
     )
     print(f'Среда: {config.environment}')
     print(f'Правило Хебба: {config.hebb_rule}')
