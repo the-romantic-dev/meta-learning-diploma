@@ -51,7 +51,6 @@ def _weights_init(m, init_weights):
 
 def make_envs(env_name: str, population_size: int) -> tuple[gym.Env, bool, int, int]:
     envs = [gym.make(env_name, verbose=0, render_mode='rgb_array') for _ in range(population_size)]
-    # envs[0] = gym.make(env_name, verbose=0, render_mode='human')
     if hasattr(envs[0].unwrapped, 'get_action_meanings') and 'FIRE' in envs[0].unwrapped.get_action_meanings():
         envs = [FireEpisodicLifeEnv(env) for env in envs]
     shape = envs[0].observation_space.shape
