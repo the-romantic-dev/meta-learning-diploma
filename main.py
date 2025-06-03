@@ -26,7 +26,7 @@ if __name__ == '__main__':
     config = Config(
         environment='CarRacing-v3',
         hebb_rule='ABCD_lr',
-        popsize=200,
+        popsize=10,
         lr=0.2,
         decay=0.995,
         sigma=0.1,

@@ -17,7 +17,7 @@ import logging
 logging.getLogger('imageio_ffmpeg').setLevel(logging.ERROR)
 from hebbian_update import hebbian_update
 from nn_models import CNN_heb, MLP_heb
-from visual import spinner_and_time
+from visual import spinner_and_time, sat
 from wrappers import FireEpisodicLifeEnv, ScaledFloatFrame
 from gymnasium.vector import SyncVectorEnv
 import time
@@ -112,7 +112,7 @@ def neg_count_add(curr_negs: np.ndarray, rewards: np.ndarray, environment, t):
     adds = (rewards < 0.0).astype(int)
     return curr_negs * (rewards < 0.0).astype(int) + adds
 
-
+@sat('Обновление весов')
 def update_policies_weights(pixel_env: bool, population_policies, population_weights):
     for i, policy in enumerate(population_policies):
         # Собираем в список тензоры с новыми весами для текущей политики
@@ -138,7 +138,7 @@ def adapt_observations(observations, envs: list[gym.Env], pixel_env: bool):
         return np.swapaxes(observations, 3, 1)
     return observations
 
-
+@sat('Получение выходов моделей')
 def get_policies_outputs(population_policies, observations, environment):
     policies_outputs = [list(p([observations[i]])) for i, p in enumerate(population_policies)]
     if 'AntBulletEnv' in environment:
@@ -149,7 +149,7 @@ def get_policies_outputs(population_policies, observations, environment):
 def calc_actions(policies_outputs, environment):
     return get_action(environment, model_out=policies_outputs[3])
 
-
+@sat('Шаг среды')
 def make_env_step(envs, actions, environment):
     results = [env.step(action) for env, action in zip(envs, actions)]
     observations, rewards, terminateds, truncateds, _ = list([np.array(res) for res in zip(*results)])
@@ -160,6 +160,12 @@ def make_env_step(envs, actions, environment):
 
     return observations, rewards, dones
 
+@sat('Нормализация весов')
+def normalize_weights(population_weights, envs):
+    for weight in population_weights:
+        for i in range(len(envs)):
+            weight[i] /= weight[i].abs().max()
+    return population_weights
 
 def fitness_hebb(
         iteration: int,
@@ -255,7 +261,8 @@ def batch_fitness_hebb(
         pbar = tqdm(desc=f"Рассчет популяции поколения {iteration + 1}")
         while True:
             step += 1
-
+            print()
+            print(f'#{step}')
             # Выполнить шаг среды для активных сред
             policies_outputs = get_policies_outputs(population_policies, observations, environment)
             actions = calc_actions(policies_outputs, environment)
@@ -289,9 +296,7 @@ def batch_fitness_hebb(
             population_weights = [p[curr_envs_flags.astype(bool)] for p in population_weights]
             population_weights = hebbian_update(hebb_rule, population_hebb_coeffs, population_weights, policies_outputs)
             if normalised_weights:
-                for weight in population_weights:
-                    for i in range(len(envs)):
-                        weight[i] /= weight[i].abs().max()
+                population_weights = normalize_weights(population_weights, envs)
             update_policies_weights(pixel_env, population_policies, population_weights)
             pbar.set_postfix({'Количество активных сред': sum(curr_envs_flags)})
             pbar.update(1)

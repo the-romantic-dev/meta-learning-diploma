@@ -1,5 +1,6 @@
 import sys
 import time
+from functools import wraps
 from threading import Thread, Event
 from typing import Callable
 
@@ -39,3 +40,19 @@ def spinner_and_time(func: Callable, message: str):
     elapsed = time.time() - start
     print(f'{msg} {elapsed:.2f} сек.')
     return result
+
+def sat(message: str):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            msg = f'{message}: '
+            spinner = Spinner(msg)
+            start = time.time()
+            spinner.start()
+            result = func(*args, **kwargs)
+            spinner.stop()
+            elapsed = time.time() - start
+            print(f'{msg}{elapsed:.2f} сек.')
+            return result
+        return wrapper
+    return decorator
