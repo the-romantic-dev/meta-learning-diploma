@@ -260,8 +260,6 @@ def batch_fitness_hebb(
         pbar = tqdm(desc=f"Рассчет популяции поколения {iteration + 1}")
         while True:
             step += 1
-            print()
-            print(f'#{step}')
             # Выполнить шаг среды для активных сред
             policies_outputs = get_policies_outputs(population_policies, observations, environment)
             actions = calc_actions(policies_outputs, environment)
