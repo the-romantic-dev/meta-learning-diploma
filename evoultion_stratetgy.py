@@ -306,13 +306,13 @@ class EvolutionStrategyHebb(object):
             print(f'Итерация {iteration + 1} | Награда (средняя): {rew_:.2f} | Награда (макс.): {rewards.max():.2f} | Время: {int(diff) // 3600:02}:{int(diff) % 3600 // 60:02}:{int(diff) % 60}:02')
             print(f'update_factor: {self.update_factor}  lr: {self.learning_rate} | sum_coeffs: {int(np.sum(self.coeffs))} sum_abs_coeffs: {int(np.sum(abs(self.coeffs)))}')
 
-            if rew_ > 0:
-                self.save(folder, rew_)
+            self.save(iteration + 1, folder, rew_)
             generations_rewards.append(rew_)
 
-    def save(self, folder: Path, reward):
-        torch.save(self.get_coeffs(), Path(folder, f'hebb_coeffs_rew_{int(reward)}'))
+    def save(self, iteration: int, folder: Path, reward):
+        postfix = f'iter_{iteration}_rew_{int(reward)}'
+        torch.save(self.get_coeffs(), Path(folder, f'hebb_coeffs_{postfix}'))
         if self.coevolve_init:
-            torch.save(self.get_coevolved_parameters(), Path(folder, f'coevolved_initial_weights_rew_{int(reward)}'))
+            torch.save(self.get_coevolved_parameters(), Path(folder, f'coevolved_initial_weights_{postfix}'))
         elif self.pixel_env:
-            torch.save(self.get_coevolved_parameters(), Path(folder, f'CNN_weights_rew_{int(reward)}'))
+            torch.save(self.get_coevolved_parameters(), Path(folder, f'CNN_weights_{postfix}'))
