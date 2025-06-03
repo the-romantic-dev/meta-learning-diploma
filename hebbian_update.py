@@ -1,10 +1,8 @@
 import numpy as np
 import torch
 
-from visual import sat
 
-
-@sat('Обновление весов')
+# @sat('Обновление весов')
 def hebbian_update(heb_rule: str,
                    heb_coeffs: torch.Tensor,
                    weights: list[torch.Tensor],
