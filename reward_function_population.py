@@ -10,20 +10,16 @@ import os
 from gymnasium import wrappers as w
 import torch.nn as nn
 import imageio_ffmpeg
-
-# Установить уровень логирования imageio_ffmpeg на ERROR (или выше)
 import logging
 
-logging.getLogger('imageio_ffmpeg').setLevel(logging.ERROR)
 from hebbian_update import hebbian_update
 from nn_models import CNN_heb, MLP_heb
-from visual import spinner_and_time
+from parallels_envs import LimitedParallelEnv
+from visual import spinner_and_time, sat
 from wrappers import FireEpisodicLifeEnv, ScaledFloatFrame
-from gymnasium.vector import SyncVectorEnv
-import time
-from IPython import display
-from PIL import Image
 
+
+logging.getLogger('imageio_ffmpeg').setLevel(logging.ERROR)
 
 def _weights_init(m, init_weights):
     if isinstance(m, torch.nn.Linear):
@@ -48,17 +44,35 @@ def _weights_init(m, init_weights):
         elif init_weights == 'default':
             pass
 
+def get_env_data(env_name: str):
+    env = gym.make(env_name, verbose=0)
+    action_dim = get_action_dim(env)
+    shape = env.observation_space.shape
+    is_pixel_env = len(shape) == 3
+    input_dim = 3 if is_pixel_env else shape[0] if shape else env.observation_space.n
+    is_fire = hasattr(env.unwrapped, 'get_action_meanings') and 'FIRE' in env.unwrapped.get_action_meanings()
+    # if len(shape) == 3:
+    #     is_pixel_env = True
+    #     input_dim = 3
+    # else:
+    #     is_pixel_env = False
+    #     input_dim = shape[0] if shape else envs[0].observation_space.n
+    return is_pixel_env, is_fire, input_dim, action_dim
 
-def make_envs(env_name: str, population_size: int) -> tuple[gym.Env, bool, int, int]:
+@sat('Инициализация среды для каждого члена популяции')
+def make_envs(env_name: str, population_size: int, is_pixel_env: bool, is_fire: bool)  -> gym.Env:
     envs = [gym.make(env_name, verbose=0, render_mode='rgb_array') for _ in range(population_size)]
-    if hasattr(envs[0].unwrapped, 'get_action_meanings') and 'FIRE' in envs[0].unwrapped.get_action_meanings():
+    if is_fire:
         envs = [FireEpisodicLifeEnv(env) for env in envs]
-    shape = envs[0].observation_space.shape
-    if len(shape) == 3:
+    if is_pixel_env:
         envs = [ScaledFloatFrame(w.ResizeObservation(env, (84, 84))) for env in envs]
-        return envs, True, 3, get_action_dim(envs[0])
-    else:
-        return envs, False, shape[0] if shape else envs[0].observation_space.n, get_action_dim(envs[0])
+    return envs
+    # shape = envs[0].observation_space.shape
+    # if len(shape) == 3:
+    #     envs = [ScaledFloatFrame(w.ResizeObservation(env, (84, 84))) for env in envs]
+    #     return envs, True, 3, get_action_dim(envs[0])
+    # else:
+    #     return envs, False, shape[0] if shape else envs[0].observation_space.n, get_action_dim(envs[0])
 
 
 def get_action_dim(env: gym.Env) -> int:
@@ -130,9 +144,9 @@ def update_policies_weights(pixel_env: bool, population_policies, population_wei
                 p_tensor.data.copy_(new_w)
 
 
-def adapt_observations(observations, envs: list[gym.Env], pixel_env: bool):
-    if isinstance(envs[0].observation_space, Discrete):
-        return [(obs == torch.arange(envs[0].observation_space.n)).float() for obs in observations]
+def adapt_observations(observations, pixel_env: bool):
+    # if isinstance(envs[0].observation_space, Discrete):
+    #     return [(obs == torch.arange(envs[0].observation_space.n)).float() for obs in observations]
     if pixel_env:
         return np.swapaxes(observations, 3, 1)
     return observations
@@ -160,9 +174,9 @@ def make_env_step(envs, actions, environment):
     return observations, rewards, dones
 
 # @sat('Нормализация весов')
-def normalize_weights(population_weights, envs):
+def normalize_weights(population_weights, popsize: int):
     for weight in population_weights:
-        for i in range(len(envs)):
+        for i in range(popsize):
             weight[i] /= weight[i].abs().max()
     return population_weights
 
@@ -215,8 +229,9 @@ def batch_fitness_hebb(
     population_hebb_coeffs = torch.from_numpy(np.array(population_hebb_coeffs))
     print(f'Размер батча: {population_size}')
     with torch.no_grad():
-        envs, pixel_env, input_dim, action_dim = spinner_and_time(lambda: make_envs(environment, population_size),
-                                                                  'Инициализация среды для каждого члена популяции')
+        pixel_env, is_fire, input_dim, action_dim = get_env_data(environment)
+        # envs = make_envs(environment, population_size, pixel_env, is_fire)
+        envs = LimitedParallelEnv(environment, population_size, 20, pixel_env, is_fire)
         population_policies_func = lambda: [
             init_policy_weights(
                 init_weights_type,
@@ -234,17 +249,17 @@ def batch_fitness_hebb(
         population_weights = [torch.stack(elem) for elem in zip(*population_weights)]
         if pixel_env:
             population_weights = population_weights[2:]
-        observations = spinner_and_time(lambda: np.array([env.reset()[0] for env in envs]),
-                                        'Получение первичных observations')
-
+        # observations = spinner_and_time(lambda: np.array([env.reset()[0] for env in envs]),
+        #                                 'Получение первичных observations')
+        observations = envs.reset()
         # Burnout phase for the bullet quadruped so it starts off from the floor
         if 'Bullet' in environment:
             action = np.zeros(8)
             for _ in range(40):
-                __ = [env.step(action) for env in envs]
+                envs.step(action)
 
         # Normalize weights flag for non-bullet envs
-        normalised_weights = ('Bullet' not in environment)
+        normalise_weights = ('Bullet' not in environment)
 
         # Inner loop
         cumulative_rewards = np.zeros(population_size)
@@ -254,7 +269,7 @@ def batch_fitness_hebb(
         neg_count = np.zeros(population_size)
         step = 0
         neg_count_threshold = 20 if 'CarRacing' in environment else 30
-        observations = adapt_observations(observations, envs, pixel_env)
+        observations = adapt_observations(observations, pixel_env)
         if save_videos:
             frames = [[] for _ in range(population_size)]
         pbar = tqdm(desc=f"Рассчет популяции поколения {iteration + 1}")
@@ -264,12 +279,13 @@ def batch_fitness_hebb(
             policies_outputs = get_policies_outputs(population_policies, observations, environment)
             actions = calc_actions(policies_outputs, environment)
 
-            observations, rewards, dones = make_env_step(envs, actions, environment)
-            if save_videos:
-                curr_frames = [env.render() for env in envs]
-                for i, curr_i in zip(population_indices, range(len(curr_frames))):
-                    frames[i].append(curr_frames[curr_i])
-            observations = adapt_observations(observations, envs, pixel_env)
+            # observations, rewards, dones = make_env_step(envs, actions, environment)
+            observations, rewards, dones = envs.step(actions)
+            # if save_videos:
+            #     curr_frames = [env.render() for env in envs]
+            #     for i, curr_i in zip(population_indices, range(len(curr_frames))):
+            #         frames[i].append(curr_frames[curr_i])
+            observations = adapt_observations(observations, pixel_env)
 
             # Добавить награды и посчитать негативные
             cumulative_rewards[population_indices] += rewards
@@ -277,7 +293,6 @@ def batch_fitness_hebb(
 
             # Обновляем флаги активных сред
             curr_envs_flags = (~(dones | (neg_count[population_indices] > neg_count_threshold))).astype(int)
-            # curr_envs_flags[0] = 0
             population_indices = population_indices[curr_envs_flags.astype(bool)]
             if sum(curr_envs_flags) == 0:
                 pbar.set_postfix({'Количество активных сред': sum(curr_envs_flags)})
@@ -287,26 +302,28 @@ def batch_fitness_hebb(
             # Обновляем списки активных сред, политик этих сред и observations
             population_policies = [pp for i, pp in enumerate(population_policies) if curr_envs_flags[i]]
             observations = observations[curr_envs_flags.astype(bool)]
-            envs = [env for env, flag in zip(envs, curr_envs_flags) if flag]
+            # envs = [env for env, flag in zip(envs, curr_envs_flags) if flag]
+            envs.remove_envs(curr_envs_flags)
             policies_outputs = [p[curr_envs_flags.astype(bool)] for p in policies_outputs]
             population_hebb_coeffs = population_hebb_coeffs[curr_envs_flags.astype(bool)]
             population_weights = [p[curr_envs_flags.astype(bool)] for p in population_weights]
             population_weights = hebbian_update(hebb_rule, population_hebb_coeffs, population_weights, policies_outputs)
-            if normalised_weights:
-                population_weights = normalize_weights(population_weights, envs)
+            if normalise_weights:
+                population_weights = normalize_weights(population_weights, envs.n_envs)
             update_policies_weights(pixel_env, population_policies, population_weights)
             pbar.set_postfix({'Количество активных сред': sum(curr_envs_flags)})
             pbar.update(1)
             t += 1
-        for env in envs:
-            env.close()
-    if save_videos:
-        best_policy_index = np.argmax(cumulative_rewards)
-        folder = Path(folder, 'videos')
-        os.makedirs(folder, exist_ok=True)
-        path = f"{folder}/best_gym_video_iter_{iteration}_rew_{cumulative_rewards[best_policy_index]:.2f}.mp4"
-        writer = imageio.get_writer(path, fps=30)
-        for frame in frames[best_policy_index]:
-            writer.append_data(frame)
-        writer.close()
+        envs.close()
+        # for env in envs:
+        #     env.close()
+    # if save_videos:
+    #     best_policy_index = np.argmax(cumulative_rewards)
+    #     folder = Path(folder, 'videos')
+    #     os.makedirs(folder, exist_ok=True)
+    #     path = f"{folder}/best_gym_video_iter_{iteration}_rew_{cumulative_rewards[best_policy_index]:.2f}.mp4"
+    #     writer = imageio.get_writer(path, fps=30)
+    #     for frame in frames[best_policy_index]:
+    #         writer.append_data(frame)
+    #     writer.close()
     return cumulative_rewards
