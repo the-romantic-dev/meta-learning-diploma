@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta, datetime
 from pathlib import Path
 import torch
@@ -11,7 +12,8 @@ import os
 from tqdm import tqdm
 
 from reward_function_population import fitness_hebb
-from visual import spinner_and_time
+from visual import spinner_and_time, sat
+
 
 # import psutil, torch, gc, os, tracemalloc
 #
@@ -188,6 +190,7 @@ class EvolutionStrategyHebb(object):
     def get_coevolved_parameters(self):
         return self.initial_weights_co.astype(np.float32)
 
+    @sat('Генерация популяции')
     def _get_population(self, coevolved=False):
         weights = self.initial_weights_co if coevolved else self.coeffs
         pop_size = self.POPULATION_SIZE
@@ -244,9 +247,6 @@ class EvolutionStrategyHebb(object):
 
         rewards = (rewards - rewards.mean()) / std
         self.update_factor = self.learning_rate / (self.POPULATION_SIZE * self.SIGMA)
-        # for index, c in enumerate(self.coeffs):
-        #     layer_population = np.array([p[index] for p in population])
-        #     self.coeffs[index] = c + self.update_factor * np.dot(layer_population.T, rewards).T
         self.coeffs += self.update_factor * np.tensordot(rewards, population, axes=(0, 0))
 
         if self.learning_rate > 0.001:
@@ -284,21 +284,40 @@ class EvolutionStrategyHebb(object):
         print(f'Запуск от {curr_datetime}\n\n{"." * 72}\n')
 
         generations_rewards = []
-
+        meta_data = {
+            'params': self.config.__dict__,
+            'min_rewards': [],
+            'mean_rewards': [],
+            'max_rewards': [],
+            'calc_rewards_times': []
+        }
         for iteration in range(iterations):  # Algorithm 2. Salimans, 2017: https://arxiv.org/abs/1703.03864
             start = time.time()
-            population = spinner_and_time(self._get_population, 'Генерация популяции')
-            # mem('generate population')# Sample normal noise:         Step 5
+            population = self._get_population() # Sample normal noise:         Step 5
             # Evolution of Hebbian coefficients & coevolution of cnn parameters and/or initial weights
+
             if self.pixel_env or self.coevolve_init:
-                population_coevolved = spinner_and_time(lambda: self._get_population(coevolved=True), 'Генерация coevolved популяции')  # Sample normal noise:         Step 5
+                population_coevolved = self._get_population(coevolved=True)  # Sample normal noise:         Step 5
+                rew_start = time.time()
                 rewards = self._get_rewards_coevolved(iteration, folder, population, population_coevolved)  # Compute population fitness:  Step 6
+                rew_end = time.time()
                 self._update_coeffs(rewards, population)  # Update coefficients:         Steps 8->12
                 self._update_coevolved_param(rewards, population_coevolved)  # Update coevolved parameters: Steps 8->12
             else:
+                rew_start = time.time()
                 rewards = self._get_rewards(pool, population)  # Compute population fitness:  Step 6
-                self._update_coeffs(rewards, population)  # Update coefficients:         Steps 8->12
-            # mem('get rewards and update coeffs')
+                rew_end = time.time()
+                self._update_coeffs(rewards, population)
+
+            meta_data['min_rewards'].append(rewards.min())
+            meta_data['max_rewards'].append(rewards.max())
+            meta_data['mean_rewards'].append(rewards.mean())
+            meta_data['calc_rewards_times'].append(rew_end - rew_start)
+            # Update coefficients:         Steps 8->12
+
+            with open(Path(folder, 'meta_data.json'), 'w', encoding='utf-8') as f:
+                json.dump(meta_data, f, ensure_ascii=False, indent=4)
+
             # Print fitness and save Hebbian coefficients and/or Coevolved / CNNs parameters
             rew_ = rewards.mean()
             end=time.time()
