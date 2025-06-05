@@ -45,14 +45,14 @@ def sat(message: str):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # msg = f'{message}: '
-            # spinner = Spinner(msg)
-            # start = time.time()
-            # spinner.start()
+            msg = f'{message}: '
+            spinner = Spinner(msg)
+            start = time.time()
+            spinner.start()
             result = func(*args, **kwargs)
-            # spinner.stop()
-            # elapsed = time.time() - start
-            # print(f'{msg}{elapsed:.2f} сек.')
+            spinner.stop()
+            elapsed = time.time() - start
+            print(f'{msg}{elapsed:.2f} сек.')
             return result
         return wrapper
     return decorator

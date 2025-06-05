@@ -265,13 +265,10 @@ def batch_fitness_hebb(
         cumulative_rewards = np.zeros(population_size)
         population_indices = np.array(range(population_size))
         t = 0
-        curr_envs_flags = np.ones(population_size)
         neg_count = np.zeros(population_size)
         step = 0
         neg_count_threshold = 20 if 'CarRacing' in environment else 30
         observations = adapt_observations(observations, pixel_env)
-        if save_videos:
-            frames = [[] for _ in range(population_size)]
         pbar = tqdm(desc=f"Рассчет популяции поколения {iteration + 1}")
         while True:
             step += 1
@@ -279,12 +276,7 @@ def batch_fitness_hebb(
             policies_outputs = get_policies_outputs(population_policies, observations, environment)
             actions = calc_actions(policies_outputs, environment)
 
-            # observations, rewards, dones = make_env_step(envs, actions, environment)
             observations, rewards, dones = envs.step(actions)
-            # if save_videos:
-            #     curr_frames = [env.render() for env in envs]
-            #     for i, curr_i in zip(population_indices, range(len(curr_frames))):
-            #         frames[i].append(curr_frames[curr_i])
             observations = adapt_observations(observations, pixel_env)
 
             # Добавить награды и посчитать негативные

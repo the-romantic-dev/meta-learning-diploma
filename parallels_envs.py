@@ -59,7 +59,7 @@ class LimitedParallelEnv:
         """Конвертирует словарь {idx: value} в np.ndarray, упорядоченный по global_indices."""
         return np.array([data_dict[idx] for idx in self.global_indices])
 
-    @sat("Stepping through environments")
+    # @sat("Stepping through environments")
     def step(self, actions: np.ndarray):
         """Выполняет шаг для всех env, возвращает (obs, rewards, dones) как np.ndarray."""
         assert len(actions) == self.n_envs, "Неверная длина массива действий"
@@ -87,7 +87,7 @@ class LimitedParallelEnv:
                 done_dict[idx] = d
         return obs_dict, rew_dict, done_dict
 
-    @sat("Removing environments based on flags")
+    # @sat("Removing environments based on flags")
     def remove_envs(self, flags: np.ndarray):
         """Удаляет env, где flags == 0, обновляет группы и процессы."""
         flags = np.asarray(flags).flatten()

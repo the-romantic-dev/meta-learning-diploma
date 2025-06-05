@@ -289,6 +289,7 @@ class EvolutionStrategyHebb(object):
             'min_rewards': [],
             'mean_rewards': [],
             'max_rewards': [],
+            'std_rewards': [],
             'calc_rewards_times': []
         }
         for iteration in range(iterations):  # Algorithm 2. Salimans, 2017: https://arxiv.org/abs/1703.03864
@@ -309,10 +310,11 @@ class EvolutionStrategyHebb(object):
                 rew_end = time.time()
                 self._update_coeffs(rewards, population)
 
-            meta_data['min_rewards'].append(rewards.min())
-            meta_data['max_rewards'].append(rewards.max())
-            meta_data['mean_rewards'].append(rewards.mean())
-            meta_data['calc_rewards_times'].append(rew_end - rew_start)
+            meta_data['min_rewards'].append(float(rewards.min()))
+            meta_data['max_rewards'].append(float(rewards.max()))
+            meta_data['mean_rewards'].append(float(rewards.mean()))
+            meta_data['std_rewards'].append(float(rewards.std()))
+            meta_data['calc_rewards_times'].append(float(rew_end - rew_start))
             # Update coefficients:         Steps 8->12
 
             with open(Path(folder, 'meta_data.json'), 'w', encoding='utf-8') as f:
@@ -324,7 +326,7 @@ class EvolutionStrategyHebb(object):
             diff = end - start
             print(f'Итерация {iteration + 1} | Награда (средняя): {rew_:.2f} | Награда (макс.): {rewards.max():.2f} | Время: {int(diff) // 3600:02}:{int(diff) % 3600 // 60:02}:{int(diff) % 60}:02')
             print(f'update_factor: {self.update_factor}  lr: {self.learning_rate} | sum_coeffs: {int(np.sum(self.coeffs))} sum_abs_coeffs: {int(np.sum(abs(self.coeffs)))}')
-
+            print('--------------------------------')
             self.save(iteration + 1, folder, rew_)
             generations_rewards.append(rew_)
 
