@@ -310,7 +310,7 @@ class EvolutionStrategyHebb(object):
                 'std_rewards': [],
                 'calc_rewards_times': []
             }
-        start_iteration = 0 if self.start_iteration is None else self.start_iteration + 1
+        start_iteration = 0 if self.start_iteration is None else self.start_iteration
         for iteration in range(start_iteration, iterations):  # Algorithm 2. Salimans, 2017: https://arxiv.org/abs/1703.03864
             start = time.time()
             population = self._get_population()  # Sample normal noise:         Step 5
