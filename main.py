@@ -28,7 +28,7 @@ def parse_args():
 
     parser.add_argument('--environment', type=str, default='CarRacing-v3')
     parser.add_argument('--hebb_rule', type=str, default='ABCD_lr')
-    parser.add_argument('--popsize', type=int, default=200)
+    parser.add_argument('--popsize', type=int, default=10)
     parser.add_argument('--lr', type=float, default=0.2)
     parser.add_argument('--decay', type=float, default=0.995)
     parser.add_argument('--sigma', type=float, default=0.1)

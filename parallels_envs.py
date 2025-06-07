@@ -87,7 +87,6 @@ class LimitedParallelEnv:
                 done_dict[idx] = d
         return obs_dict, rew_dict, done_dict
 
-    # @sat("Removing environments based on flags")
     def remove_envs(self, flags: np.ndarray):
         """Удаляет env, где flags == 0, обновляет группы и процессы."""
         flags = np.asarray(flags).flatten()
@@ -127,7 +126,6 @@ class LimitedParallelEnv:
         self.global_indices = remaining
         self.n_envs = len(self.global_indices)
 
-    @sat("Closing all remaining environments")
     def close(self):
         self._send_close_commands()
         self._join_all_workers()
@@ -202,30 +200,3 @@ def _process_close(envs):
     """Закрывает все env, оставшиеся в словаре."""
     for env in envs.values():
         env.close()
-
-
-# if __name__ == "__main__":
-#     N = 200
-#     envs = LimitedParallelEnv("CarRacing-v3", n_envs=N, max_workers=20, is_pixel_env=True)
-#
-#     obs = envs.reset()
-#     print("Initial obs count:", len(obs))  # 10
-#
-#     # Делаем пару шагов с рандомными actions
-#     for _ in range(5):
-#         actions = [gym.make("CarRacing-v3").action_space.sample() for _ in range(envs.n_envs)]
-#         obs, rews, dones = envs.step(np.array(actions))
-#
-#     # Предположим, хотим удалить env с индексами 2, 5 и 7 (вытянем флаги)
-#     flags = np.ones(envs.n_envs, dtype=int)
-#     flags[[2, 5, 7]] = 0
-#
-#     envs.remove_envs(flags)
-#     print("After removal, env count:", envs.n_envs)  # 7
-#
-#     # Теперь шаги будут только по 7 средам:
-#     for _ in range(3):
-#         actions = [gym.make("CarRacing-v3").action_space.sample() for _ in range(envs.n_envs)]
-#         obs, rews, dones = envs.step(np.array(actions))
-#
-#     envs.close()

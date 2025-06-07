@@ -35,6 +35,7 @@ def _weights_init(m, init_weights):
         elif init_weights == 'default':
             pass
 
+
 def make_env(env_name: str) -> tuple[gym.Env, bool, int]:
     env = gym.make(env_name, verbose=0, render_mode='human')
     if hasattr(env.unwrapped, 'get_action_meanings') and 'FIRE' in env.unwrapped.get_action_meanings():
@@ -46,6 +47,7 @@ def make_env(env_name: str) -> tuple[gym.Env, bool, int]:
     else:
         return env, False, shape[0] if shape else env.observation_space.n
 
+
 def get_action_dim(env: gym.Env) -> int:
     if isinstance(env.action_space, Box):
         return env.action_space.shape[0]
@@ -54,8 +56,10 @@ def get_action_dim(env: gym.Env) -> int:
     else:
         raise ValueError('Only Box and Discrete action spaces supported')
 
+
 def make_policy(is_pixel_env, action_dim, input_dim):
     return CNN_heb(input_dim, action_dim) if is_pixel_env else MLP_heb(input_dim, action_dim)
+
 
 def init_policy_weights(init_weights_type, is_pixel_env, policy, initial_weights_co):
     def weights_init(m):
@@ -67,18 +71,19 @@ def init_policy_weights(init_weights_type, is_pixel_env, policy, initial_weights
         # Randomly sample initial weights from chosen distribution
         policy.apply(weights_init)
 
-          # Load CNN paramters
+        # Load CNN paramters
         if is_pixel_env:
             cnn_weights1 = initial_weights_co[:162]
             cnn_weights2 = initial_weights_co[162:]
-            list(policy.parameters())[0].data = cnn_weights1.reshape((6,3,3,3))
-            list(policy.parameters())[1].data = cnn_weights2.reshape((8,6,5,5))
+            list(policy.parameters())[0].data = cnn_weights1.reshape((6, 3, 3, 3))
+            list(policy.parameters())[1].data = cnn_weights2.reshape((8, 6, 5, 5))
     return policy.float()
+
 
 def fitness_hebb(
         hebb_rule: str,
-        environment : str,
-        init_weights_type = 'uni' ,
+        environment: str,
+        init_weights_type='uni',
         *evolved_parameters: List[np.array]) -> float:
     """
     Evaluate an agent 'evolved_parameters' controlled by a Hebbian network in an environment 'environment' during a lifetime.
@@ -102,7 +107,7 @@ def fitness_hebb(
         weights = weights[2:] if pixel_env else weights
 
         observation = env.reset()[0]
-        observation = observation if not pixel_env else np.swapaxes(observation,0,2) #(3, 84, 84)
+        observation = observation if not pixel_env else np.swapaxes(observation, 0, 2)  # (3, 84, 84)
 
         # Burnout phase for the bullet quadruped so it starts off from the floor
         if 'Bullet' in environment:
@@ -124,14 +129,12 @@ def fitness_hebb(
                 observation = (observation == torch.arange(env.observation_space.n)).float()
 
             outputs = list(policy([observation]))
-            # outputs[0] = outputs[0].numpy()
-            # outputs[1] = outputs[1].numpy()
-            # outputs[2] = outputs[2].numpy()
 
             # Bounding the action space
             if 'CarRacing' in environment:
                 action = np.array([
-                    torch.tanh(outputs[3][0]), torch.sigmoid(outputs[3][1]), torch.sigmoid(outputs[3][2]) ]).astype(np.float32)
+                    torch.tanh(outputs[3][0]), torch.sigmoid(outputs[3][1]), torch.sigmoid(outputs[3][2])]).astype(
+                    np.float32)
                 # outputs[3] = outputs[3].numpy()
             elif 'AntBulletEnv' in environment:
                 outputs[3] = torch.tanh(outputs[3])
@@ -144,35 +147,30 @@ def fitness_hebb(
                     action = np.argmax(outputs[3]).numpy()
                 # outputs[3] = outputs[3].numpy()
 
-
             # Environment simulation step
             observation, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
             if 'AntBulletEnv' in environment:
-              reward = env.unwrapped.rewards[1] # Distance walked
+                reward = env.unwrapped.rewards[1]  # Distance walked
             rew_ep += reward
 
-            env.render() # Gym envs
+            env.render()  # Gym envs
 
-            if pixel_env: observation = np.swapaxes(observation,2,0) #(3, 84, 84)
+            if pixel_env: observation = np.swapaxes(observation, 2, 0)  # (3, 84, 84)
 
             # Early stopping conditions
             if 'CarRacing' in environment:
-                neg_count = neg_count+1 if reward < 0.0 else 0
+                neg_count = neg_count + 1 if reward < 0.0 else 0
                 if (done or neg_count > 20):
                     break
             elif 'AntBulletEnv' in environment:
                 if t > 200:
-                    neg_count = neg_count+1 if reward < 0.0 else 0
+                    neg_count = neg_count + 1 if reward < 0.0 else 0
                     if (done or neg_count > 30):
                         break
             else:
                 if done:
                     break
-            # else:
-            #     neg_count = neg_count+1 if reward < 0.0 else 0
-            #     if (done or neg_count > 50):
-            #         break
 
             t += 1
 
@@ -181,11 +179,11 @@ def fitness_hebb(
 
             # Normalise weights per layer
             if normalised_weights:
-              params = list(policy.parameters())
-              indices = (0, 1, 2) if not pixel_env else (2, 3, 4)
-              for i in indices:
-                p = params[i]
-                p.data /= p.abs().max()
+                params = list(policy.parameters())
+                indices = (0, 1, 2) if not pixel_env else (2, 3, 4)
+                for i in indices:
+                    p = params[i]
+                    p.data /= p.abs().max()
         env.close()
 
     return rew_ep

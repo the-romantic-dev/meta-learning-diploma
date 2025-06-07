@@ -15,14 +15,24 @@ def hebbian_update(heb_rule: str,
     updated_weights = []
     offset = 0
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    is_population = len(weights[0].shape) == 3
     for z, w in enumerate(weights):
         w = w.to(device)
-        popsize, out_dim, in_dim = w.shape
+        if is_population:
+            popsize, out_dim, in_dim = w.shape
+        else:
+            out_dim, in_dim = w.shape
         block_size = out_dim * in_dim
-        coeffs = heb_coeffs[:, offset:offset + block_size, :].permute(2, 0, 1).to(device)
-        coeffs = coeffs.reshape(coeffs.shape[0], coeffs.shape[1], out_dim, in_dim)
-        o_in = outputs[z + 1].to(device).unsqueeze(2)
-        o_out = outputs[z].to(device).unsqueeze(1)
+        if is_population:
+            coeffs = heb_coeffs[:, offset:offset + block_size, :].permute(2, 0, 1).to(device)
+            coeffs = coeffs.reshape(coeffs.shape[0], coeffs.shape[1], out_dim, in_dim)
+            o_in = outputs[z + 1].to(device).unsqueeze(2)
+            o_out = outputs[z].to(device).unsqueeze(1)
+        else:
+            coeffs = heb_coeffs[offset:offset + block_size, :].permute(1, 0).to(device)
+            coeffs = coeffs.reshape(coeffs.shape[0], out_dim, in_dim)
+            o_in = outputs[z + 1].to(device).unsqueeze(1)
+            o_out = outputs[z].to(device).unsqueeze(0)
         # reshape coefficients and compute delta
         if heb_rule == 'A':
             A = coeffs

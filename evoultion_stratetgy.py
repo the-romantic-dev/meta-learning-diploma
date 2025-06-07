@@ -15,34 +15,6 @@ from tqdm import tqdm
 from reward_function_population import fitness_hebb
 from visual import spinner_and_time, sat
 
-
-# import psutil, torch, gc, os, tracemalloc
-#
-# P = psutil.Process(os.getpid())
-# tracemalloc_started = False
-#
-# def mem(tag):
-#     global tracemalloc_started
-#     if not tracemalloc_started:
-#         tracemalloc.start()
-#         tracemalloc_started = True
-#
-#     cpu = P.memory_info().rss / 1024**2
-#     snapshot = tracemalloc.take_snapshot()
-#     top_stats = snapshot.statistics('lineno')
-#     top = top_stats[0] if top_stats else None
-#
-#     if torch.cuda.is_available():
-#         gpu = torch.cuda.memory_allocated() / 1024**2
-#         cache = torch.cuda.memory_reserved() / 1024**2
-#         print(f"[{tag}]  CPU {cpu:,.0f} MB | GPU {gpu:,.0f}/{cache:,.0f} MB")
-#     else:
-#         print(f"[{tag}]  CPU {cpu:,.0f} MB")
-#
-#     if top:
-#         print(f"  Top tracemalloc: {top.size / 1024 / 1024:.1f} MB at {top.traceback.format()[-1].strip()}")
-
-
 def compute_ranks(x):
     """
     Returns rank as a vector of len(x) with integers from 0 to len(x)
@@ -238,7 +210,7 @@ class EvolutionStrategyHebb(object):
         rewards = self.get_reward(iteration, folder,
                                   self.config.hebb_rule, self.config.environment, self.config.save_videos,
                                   self.config.init_weights,
-                                  heb_coeffs_tries, coevolved_parameters_tries)
+                                  heb_coeffs_tries, coevolved_parameters_tries, is_coevolved = self.coevolve_init)
         # for z in tqdm(
         #         range(len(population)),
         #         desc=f'Обработка популяции'):
