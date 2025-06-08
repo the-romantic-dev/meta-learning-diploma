@@ -31,7 +31,8 @@ class Config:
 def get_last_iter_files(folder: Path):
     max_files = {
         'CNN_weights': {'i': -1, 'path': None},
-        'hebb_coeffs': {'i': -1, 'path': None}
+        'hebb_coeffs': {'i': -1, 'path': None},
+        'coevolved_initial_weights': {'i': -1, 'path': None}
     }
     pattern = re.compile(r'iter_(\d+)')
     for filename in os.listdir(folder):
@@ -57,8 +58,10 @@ if __name__ == '__main__':
         metadata = json.load(f)
     files = get_last_iter_files(folder)
     config = Config(**metadata['params'])
-
-    cnn_weights = torch.load(files['CNN_weights']['path'], weights_only=False)
+    if config.init_weights == 'coevolve':
+        init_weights = torch.load(files['coevolved_initial_weights']['path'], weights_only=False)
+    else:
+        init_weights = torch.load(files['CNN_weights']['path'], weights_only=False)
     hebb_coeffs = torch.load(files['hebb_coeffs']['path'], weights_only=False)
     start_iteration = files['hebb_coeffs']['i']
     print(f'Среда: {config.environment}')
@@ -67,7 +70,7 @@ if __name__ == '__main__':
     print(f'Количество поколений: {config.generations}')
 
     es = spinner_and_time(
-        lambda: EvolutionStrategyHebb(config, start_coeffs=hebb_coeffs, start_init_weights_co=cnn_weights, start_metadata=metadata, start_iteration=start_iteration, start_folder=folder), 'Инициализация эволюционной стратегии')
+        lambda: EvolutionStrategyHebb(config, start_coeffs=hebb_coeffs, start_init_weights_co=init_weights, start_metadata=metadata, start_iteration=start_iteration, start_folder=folder), 'Инициализация эволюционной стратегии')
 
     print('\n ♪┏(°.°)┛┗(°.°)┓ Запуск эволюционной стратегии ┗(°.°)┛┏(°.°)┓ ♪ \n')
     start = time.time()
