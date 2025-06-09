@@ -6,7 +6,6 @@ from gymnasium.wrappers import ResizeObservation
 from wrappers import FireEpisodicLifeEnv, ScaledFloatFrame
 
 
-@sat("Initializing LimitedParallelEnv")
 class LimitedParallelEnv:
     def __init__(self, env_name: str, n_envs: int, max_workers: int,
                  is_pixel_env: bool = False, is_fire: bool = False):
@@ -41,7 +40,6 @@ class LimitedParallelEnv:
             procs.append(p)
         return pipes, procs
 
-    @sat("Resetting all environments")
     def reset(self):
         """Возвращает np.ndarray наблюдений в порядке global_indices."""
         obs_dict = self._gather_initial_observations()

@@ -11,6 +11,7 @@ from gymnasium.spaces import Discrete, Box
 import gymnasium as gym
 from gymnasium import wrappers as w, Env
 import torch.nn as nn
+import multiprocessing as mp
 
 from hebbian_update import hebbian_update
 from nn_models import CNN_heb, MLP_heb
@@ -220,23 +221,6 @@ def blur_tensor(img_tensor, kernel_size=5, sigma=1.0):
     blurred = F.conv2d(img_tensor, kernel, groups=img_tensor.shape[1], padding=padding)
     return blurred.squeeze(0)  # back to (3, H, W)
 
-# def calc_actions(policies_outputs, environment):
-#     return get_population_actions(environment, model_out=policies_outputs[3])
-
-
-# @sat('Шаг среды')
-# def make_env_step(envs, actions, environment):
-#     results = [env.step(action) for env, action in zip(envs, actions)]
-#     observations, rewards, terminateds, truncateds, _ = list([np.array(res) for res in zip(*results)])
-#     dones = terminateds | truncateds
-#
-#     if 'AntBulletEnv' in environment:
-#         rewards = [env.unwrapped.rewards[1] for env in envs]  # Distance walked
-#
-#     return observations, rewards, dones
-
-
-# @sat('Нормализация весов')
 def normalize_population_weights(population_weights, popsize: int):
     for weight in population_weights:
         for i in range(popsize):
@@ -303,8 +287,8 @@ def batch_fitness_hebb(
     print(f'Размер батча: {population_size}')
     with torch.no_grad():
         pixel_env, is_fire, input_dim, action_dim = get_env_data(environment)
-        # envs = make_envs(environment, population_size, pixel_env, is_fire)
-        envs = LimitedParallelEnv(environment, population_size, 20, pixel_env, is_fire)
+        print(f'Количество ядер: {mp.cpu_count()}')
+        envs = LimitedParallelEnv(environment, population_size, mp.cpu_count(), pixel_env, is_fire)
         population_policies_func = lambda: [
             init_policy_weights(
                 init_weights_type,
@@ -322,8 +306,6 @@ def batch_fitness_hebb(
         population_weights = [torch.stack(elem) for elem in zip(*population_weights)]
         if pixel_env:
             population_weights = population_weights[2:]
-        # observations = spinner_and_time(lambda: np.array([env.reset()[0] for env in envs]),
-        #                                 'Получение первичных observations')
         observations = envs.reset()
         # Burnout phase for the bullet quadruped so it starts off from the floor
         if 'Bullet' in environment:

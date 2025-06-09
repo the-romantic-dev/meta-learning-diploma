@@ -15,6 +15,7 @@ from tqdm import tqdm
 from reward_function_population import fitness_hebb
 from visual import spinner_and_time, sat
 
+
 def compute_ranks(x):
     """
     Returns rank as a vector of len(x) with integers from 0 to len(x)
@@ -120,7 +121,8 @@ def get_init_weights(distribution: str, plastic_weights, cnn_weights):
 
 
 class EvolutionStrategyHebb(object):
-    def __init__(self, config, start_coeffs=None, start_init_weights_co=None, start_iteration=None, start_metadata = None, start_folder=None):
+    def __init__(self, config, start_coeffs=None, start_init_weights_co=None, start_iteration=None, start_metadata=None,
+                 start_folder=None):
         self.config = config
         self.num_threads = mp.cpu_count() if config.threads == -1 else config.threads
         self.update_factor = config.lr / (config.popsize * config.sigma)
@@ -146,14 +148,13 @@ class EvolutionStrategyHebb(object):
         cnn_weights = 1362 if self.pixel_env else 0
         inp_dim = 648 if self.pixel_env else get_input_dim(env)
         plastic_weights = ((128 * inp_dim) + (64 * 128) + (action_dim * 64))
-        # torch.manual_seed(42)
         if start_init_weights_co is not None:
             self.initial_weights_co = start_init_weights_co
         else:
             if self.pixel_env or self.coevolve_init:
                 self.initial_weights_co = get_init_weights(
                     config.distribution,
-                    plastic_weights  if self.coevolve_init else 0,
+                    plastic_weights if self.coevolve_init else 0,
                     cnn_weights)
 
         if start_coeffs is not None:
@@ -182,7 +183,7 @@ class EvolutionStrategyHebb(object):
         ]
         return np.stack(pops, axis=1).astype(np.float32)
 
-    def _get_rewards(self, pool, population):
+    def _get_rewards(self, population):
         def get_heb_coeffs_try(p):
             return np.array([self.coeffs[index] + self.SIGMA * i for index, i in enumerate(p)]).astype(np.float32)
 
@@ -210,13 +211,7 @@ class EvolutionStrategyHebb(object):
         rewards = self.get_reward(iteration, folder,
                                   self.config.hebb_rule, self.config.environment, self.config.save_videos,
                                   self.config.init_weights,
-                                  heb_coeffs_tries, coevolved_parameters_tries, is_coevolved = self.coevolve_init)
-        # for z in tqdm(
-        #         range(len(population)),
-        #         desc=f'Обработка популяции'):
-        #     rewards.append(self.get_reward(self.config.hebb_rule, self.config.environment, self.config.init_weights,
-        #                                    heb_coeffs_try,
-        #                                    coevolved_parameters_try))
+                                  heb_coeffs_tries, coevolved_parameters_tries, is_coevolved=self.coevolve_init)
 
         rewards = np.array(rewards).astype(np.float32)
         return rewards
@@ -248,9 +243,6 @@ class EvolutionStrategyHebb(object):
         rewards = (rewards - rewards.mean()) / std
         self.update_factor = self.learning_rate / (self.POPULATION_SIZE * self.SIGMA)
         self.initial_weights_co += self.update_factor * np.tensordot(rewards, population, axes=(0, 0))
-        # for index, w in enumerate(self.initial_weights_co):
-        #     layer_population = np.array([p[index] for p in population])
-        #     self.initial_weights_co[index] = w + self.update_factor * np.dot(layer_population.T, rewards).T
 
     def run(self, iterations, print_step=10, path='/content/hebb_coeffs'):
         curr_datetime = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H-%M-%S')
@@ -283,7 +275,8 @@ class EvolutionStrategyHebb(object):
                 'calc_rewards_times': []
             }
         start_iteration = 0 if self.start_iteration is None else self.start_iteration
-        for iteration in range(start_iteration, iterations):  # Algorithm 2. Salimans, 2017: https://arxiv.org/abs/1703.03864
+        for iteration in range(start_iteration,
+                               iterations):  # Algorithm 2. Salimans, 2017: https://arxiv.org/abs/1703.03864
             start = time.time()
             population = self._get_population()  # Sample normal noise:         Step 5
             # Evolution of Hebbian coefficients & coevolution of cnn parameters and/or initial weights
@@ -298,7 +291,7 @@ class EvolutionStrategyHebb(object):
                 self._update_coevolved_param(rewards, population_coevolved)  # Update coevolved parameters: Steps 8->12
             else:
                 rew_start = time.time()
-                rewards = self._get_rewards(pool, population)  # Compute population fitness:  Step 6
+                rewards = self._get_rewards(population)  # Compute population fitness:  Step 6
                 rew_end = time.time()
                 self._update_coeffs(rewards, population)
 

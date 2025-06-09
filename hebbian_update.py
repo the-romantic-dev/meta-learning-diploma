@@ -24,8 +24,12 @@ def hebbian_update(heb_rule: str,
             out_dim, in_dim = w.shape
         block_size = out_dim * in_dim
         if is_population:
-            coeffs = heb_coeffs[:, offset:offset + block_size, :].permute(2, 0, 1).to(device)
-            coeffs = coeffs.reshape(coeffs.shape[0], coeffs.shape[1], out_dim, in_dim)
+            if heb_rule == 'A':
+                coeffs = heb_coeffs[:, offset:offset + block_size].permute(0, 1).to(device)
+                coeffs = coeffs.reshape(coeffs.shape[0], out_dim, in_dim)
+            else:
+                coeffs = heb_coeffs[:, offset:offset + block_size, :].permute(2, 0, 1).to(device)
+                coeffs = coeffs.reshape(coeffs.shape[0], coeffs.shape[1], out_dim, in_dim)
             o_in = outputs[z + 1].to(device).unsqueeze(2)
             o_out = outputs[z].to(device).unsqueeze(1)
         else:

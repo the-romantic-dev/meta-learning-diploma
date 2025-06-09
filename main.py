@@ -2,25 +2,10 @@ import argparse
 import random
 import time
 from dataclasses import dataclass
-from evoultion_stratetgy import EvolutionStrategyHebb
+
+from config import Config
+from evolution_strategy import EvolutionStrategyHebb
 from visual import spinner_and_time
-
-
-@dataclass
-class Config:
-    environment: str
-    hebb_rule: str
-    popsize: int
-    lr: float
-    decay: float
-    sigma: float
-    init_weights: str
-    print_every: int
-    generations: int
-    threads: int
-    folder: str
-    distribution: str
-    save_videos: bool
 
 
 def parse_args():
@@ -58,5 +43,6 @@ if __name__ == '__main__':
     print('\n ♪┏(°.°)┛┗(°.°)┓ Запуск эволюционной стратегии ┗(°.°)┛┏(°.°)┓ ♪ \n')
     start = time.time()
     es.run(config.generations, print_step=config.print_every, path=config.folder)
+    # es._get_population()
     end = time.time()
     print(f'\nЭволюция заняла: {end - start:.2f} сек\n')
