@@ -3,10 +3,11 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 
 from config import Config
-from reward_function_population import evaluate_rewards
+from reward_function_population import show_model, evaluate
 
 
 @dataclass
@@ -66,18 +67,44 @@ def get_best_iter_weights(experiment_folder: Path):
     hebb_coeffs = torch.load(Path(experiment_folder, hebb_coeffs_filename), weights_only=False)
     init_weights_coevolve_filename = cnn_weights_filename if cnn_weights_filename is not None else coevolve_weights_filename
     init_weights_coevolve = torch.load(Path(experiment_folder, init_weights_coevolve_filename), weights_only=False)
-    return torch.from_numpy(hebb_coeffs), init_weights_coevolve
+    return torch.from_numpy(hebb_coeffs), np.array(init_weights_coevolve)
 
 
 if __name__ == '__main__':
     # CNN_weights_path = Path('experiments/CNN_best_ka_uni_200_normal')
     # hebb_coeffs_path = Path('experiments/best_ka_uni_200_normal')
-    experiment_folder = Path(r"D:\Убежище\Университет\Диплом\Эксперименты\_законченные_\CarRacing_ABCD_lr_uni_250_300_normal 2025-06-05 21-37-59")
-    print(f'best_iter: {get_best_iter(experiment_folder)}, best_rew: {get_metadata(experiment_folder).mean_rewards[get_best_iter(experiment_folder) - 1]}')
+    experiment_folder = Path(r"D:\Убежище\Университет\Диплом\Эксперименты\_законченные_")
+    exp = 'CarRacing_ABCD_lr_uni_200_300_uniform 2025-06-07 12-34-59'
+    experiment_folder = Path(experiment_folder, exp)
+    print(
+        f'best_iter: {get_best_iter(experiment_folder)}, best_rew: {get_metadata(experiment_folder).mean_rewards[get_best_iter(experiment_folder) - 1]}')
     hebb_coeffs, init_weights = get_best_iter_weights(experiment_folder)
     # cnn_weights = torch.load(CNN_weights_path, weights_only=False)
     # hebb_coeffs = torch.Tensor(torch.load(hebb_coeffs_path, weights_only=False))
-    evaluate_rewards('ABCD_lr', 'CarRacing-v3', hebb_coeffs=hebb_coeffs, initial_weights_co=init_weights)
+    # show_model(
+    #     'ABCD_lr', 'CarRacing-v3', init_weights_type='coevolve',
+    #     hebb_coeffs=hebb_coeffs, initial_weights_co=init_weights, make_blur=True, is_coevolved=True)
+
+    rew_for_clear = evaluate(
+        hebb_rule='ABCD_lr',
+        environment='CarRacing-v3',
+        is_coevolved=False,
+        population_hebb_coeffs=[hebb_coeffs.clone() for _ in range(100)],
+        population_initial_weights_co=[init_weights.copy() for _ in range(100)]
+    )
+
+    rew_for_blur = evaluate(
+        hebb_rule='ABCD_lr',
+        environment='CarRacing-v3',
+        is_coevolved=False,
+        is_blur=True,
+        population_hebb_coeffs=[hebb_coeffs.clone() for _ in range(100)],
+        population_initial_weights_co=[init_weights.copy() for _ in range(100)]
+    )
+
+    print(f'clear: {sum(rew_for_clear) / 100}')
+    print(f'blur: {sum(rew_for_blur) / 100}')
+
     # folder = Path('D:\Убежище\Университет\Диплом\Эксперименты\_законченные_')
     #
     # experiment = Path(folder, 'CarRacing_ABCD_lr_ka_uni_200_300_normal 2025-06-05 22-43-30')

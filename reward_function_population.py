@@ -178,20 +178,20 @@ def adapt_observations(observations, pixel_env: bool):
     return observations
 
 
-def get_population_policies_outputs(population_policies, observations, environment):
+def get_population_policies_outputs(population_policies, observations, environment, make_blur: bool = False):
     # policies_outputs = [list(p([observations[i]])) for i, p in enumerate(population_policies)]
     # if 'AntBulletEnv' in environment:
     #     policies_outputs[3] = torch.tanh(policies_outputs[3])
-    policies_outputs = [get_policy_outputs(p, o, environment) for p, o in zip(population_policies, observations)]
+    policies_outputs = [get_policy_outputs(p, o, environment, make_blur) for p, o in zip(population_policies, observations)]
     return [torch.stack(grouped) for grouped in list(zip(*policies_outputs))]
 
 
 def get_policy_outputs(policy, observations, environment, make_blur: bool = False):
-    def show_tensor(tensor):
-        img = TF.to_pil_image(tensor.clamp(0, 1))
-        plt.imshow(img)
-        plt.axis('off')
-        plt.show()
+    # def show_tensor(tensor):
+    #     img = TF.to_pil_image(tensor.clamp(0, 1))
+    #     plt.imshow(img)
+    #     plt.axis('off')
+    #     plt.show()
 
     if make_blur:
         observations = blur_tensor(torch.from_numpy(observations), kernel_size=10).numpy()
@@ -365,13 +365,14 @@ def batch_fitness_hebb(
     return cumulative_rewards
 
 
-def evaluate_rewards(
+def show_model(
         hebb_rule: str,
         environment: str,
         init_weights_type='uni',
         hebb_coeffs: torch.Tensor = None,
         initial_weights_co: torch.Tensor = None,
-        make_blur: bool = False
+        make_blur: bool = False,
+        is_coevolved: bool = False
 ) -> float:
     """
     Evaluate an agent 'evolved_parameters' controlled by a Hebbian network in an environment 'environment' during a lifetime.
@@ -385,7 +386,6 @@ def evaluate_rewards(
         policy = init_policy_weights(init_weights_type, pixel_env, make_policy(pixel_env, action_dim, input_dim),
                                      initial_weights_co)
         weights = [w.detach() for w in policy.parameters()]
-        # population_weights = [torch.stack(elem) for elem in zip(*population_weights)]
         if pixel_env:
             weights = weights[2:]
         observations, _ = env.reset()
@@ -395,7 +395,6 @@ def evaluate_rewards(
         neg_count_threshold = 20 if 'CarRacing' in environment else 30
         observations = adapt_observations(observations, pixel_env)
         while True:
-            # Выполнить шаг среды для активных сред
             policy_outputs = get_policy_outputs(policy, observations, environment, make_blur)
             model_out = policy_outputs[3]
             actions = torch.stack([torch.tanh(model_out[0]), torch.sigmoid(model_out[1]), torch.sigmoid(model_out[2])])
@@ -405,7 +404,6 @@ def evaluate_rewards(
             done = trunc or term
             observations = adapt_observations(observations, pixel_env)
 
-            # Добавить награды и посчитать негативные
             cumulative_reward += rewards
             neg_count = neg_count + 1 if float(rewards) < 0.0 else 0
 
@@ -414,9 +412,106 @@ def evaluate_rewards(
             if done or neg_count > neg_count_threshold:
                 print(f'Итоговая награда: {cumulative_reward}')
                 break
-
-            weights = hebbian_update(hebb_rule, hebb_coeffs, weights, policy_outputs)
-            weights = normalize_weights(weights)
-            update_policy_weights(policy, weights)
+            if not is_coevolved:
+                weights = hebbian_update(hebb_rule, hebb_coeffs, weights, policy_outputs)
+                weights = normalize_weights(weights)
+                update_policy_weights(policy, weights)
         env.close()
     return cumulative_reward
+
+def evaluate(
+        hebb_rule: str,
+        environment: str,
+        is_coevolved: bool = False,
+        is_blur: bool = False,
+        population_hebb_coeffs: list[torch.Tensor] = None,
+        population_initial_weights_co: list[torch.Tensor] = None
+) -> float:
+    """
+    Evaluate an agent 'evolved_parameters' controlled by a Hebbian network in an environment 'environment' during a lifetime.
+    The initial weights are either co-evolved (if 'init_weights' == 'coevolve') along with the Hebbian coefficients or randomly sampled at each episode from the 'init_weights' distribution.
+    Subsequently the weights are updated following the hebbian update mechanism 'hebb_rule'.
+    Returns the episodic fitness of the agent.
+    """
+    init_weights_type = 'uni' if not is_coevolved else 'coevolve'
+    population_size = len(population_hebb_coeffs)
+    population_hebb_coeffs = torch.from_numpy(np.array(population_hebb_coeffs))
+    print(f'Размер батча: {population_size}')
+    with torch.no_grad():
+        pixel_env, is_fire, input_dim, action_dim = get_env_data(environment)
+        print(f'Количество ядер: {mp.cpu_count()}')
+        envs = LimitedParallelEnv(environment, population_size, mp.cpu_count(), pixel_env, is_fire)
+        population_policies_func = lambda: [
+            init_policy_weights(
+                init_weights_type,
+                pixel_env,
+                make_policy(pixel_env, action_dim, input_dim),
+                population_initial_weights_co[i])
+            for i in range(population_size)
+        ]
+        population_policies = spinner_and_time(population_policies_func, 'Инициализация весов моделей в популяции')
+        population_weights_func = lambda: [
+            [w.detach() for w in policy.parameters()]
+            for policy in population_policies
+        ]
+        population_weights = spinner_and_time(population_weights_func, 'Выгрузка весов из моделей')
+        population_weights = [torch.stack(elem) for elem in zip(*population_weights)]
+        if pixel_env:
+            population_weights = population_weights[2:]
+        observations = envs.reset()
+        # Burnout phase for the bullet quadruped so it starts off from the floor
+        if 'Bullet' in environment:
+            action = np.zeros(8)
+            for _ in range(40):
+                envs.step(action)
+
+        # Normalize weights flag for non-bullet envs
+        normalise_weights = ('Bullet' not in environment)
+
+        # Inner loop
+        cumulative_rewards = np.zeros(population_size)
+        population_indices = np.array(range(population_size))
+        t = 0
+        neg_count = np.zeros(population_size)
+        step = 0
+        neg_count_threshold = 20 if 'CarRacing' in environment else 30
+        observations = adapt_poppulation_observations(observations, pixel_env)
+        pbar = tqdm(desc=f"Рассчет {population_size} сред")
+        while True:
+            step += 1
+            # Выполнить шаг среды для активных сред
+            policies_outputs = get_population_policies_outputs(population_policies, observations, environment, make_blur=is_blur)
+            actions = get_population_actions(environment, model_out=policies_outputs[3])
+            # calc_actions(policies_outputs, environment)
+            observations, rewards, dones = envs.step(actions)
+            observations = adapt_poppulation_observations(observations, pixel_env)
+
+            # Добавить награды и посчитать негативные
+            cumulative_rewards[population_indices] += rewards
+            neg_count[population_indices] = neg_count_add(neg_count[population_indices], rewards, environment, t)
+
+            # Обновляем флаги активных сред
+            curr_envs_flags = (~(dones | (neg_count[population_indices] > neg_count_threshold))).astype(int)
+            population_indices = population_indices[curr_envs_flags.astype(bool)]
+            if sum(curr_envs_flags) == 0:
+                pbar.set_postfix({'Количество активных сред': sum(curr_envs_flags)})
+                pbar.update(1)
+                break
+
+            # Обновляем списки активных сред, политик этих сред и observations
+            population_policies = [pp for i, pp in enumerate(population_policies) if curr_envs_flags[i]]
+            observations = observations[curr_envs_flags.astype(bool)]
+            envs.remove_envs(curr_envs_flags)
+            policies_outputs = [p[curr_envs_flags.astype(bool)] for p in policies_outputs]
+            population_hebb_coeffs = population_hebb_coeffs[curr_envs_flags.astype(bool)]
+            population_weights = [p[curr_envs_flags.astype(bool)] for p in population_weights]
+            if not is_coevolved:
+                population_weights = hebbian_update(hebb_rule, population_hebb_coeffs, population_weights, policies_outputs)
+                if normalise_weights:
+                    population_weights = normalize_population_weights(population_weights, envs.n_envs)
+                update_population_policies_weights(population_policies, population_weights)
+            pbar.set_postfix({'Количество активных сред': sum(curr_envs_flags)})
+            pbar.update(1)
+            t += 1
+        envs.close()
+    return cumulative_rewards
