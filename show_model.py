@@ -81,29 +81,29 @@ if __name__ == '__main__':
     hebb_coeffs, init_weights = get_best_iter_weights(experiment_folder)
     # cnn_weights = torch.load(CNN_weights_path, weights_only=False)
     # hebb_coeffs = torch.Tensor(torch.load(hebb_coeffs_path, weights_only=False))
-    # show_model(
-    #     'ABCD_lr', 'CarRacing-v3', init_weights_type='coevolve',
-    #     hebb_coeffs=hebb_coeffs, initial_weights_co=init_weights, make_blur=True, is_coevolved=True)
+    show_model(
+        'ABCD_lr', 'CarRacing-v3',
+        hebb_coeffs=hebb_coeffs, initial_weights_co=init_weights, make_blur=True)
 
-    rew_for_clear = evaluate(
-        hebb_rule='ABCD_lr',
-        environment='CarRacing-v3',
-        is_coevolved=False,
-        population_hebb_coeffs=[hebb_coeffs.clone() for _ in range(100)],
-        population_initial_weights_co=[init_weights.copy() for _ in range(100)]
-    )
+    # rew_for_clear = evaluate(
+    #     hebb_rule='ABCD_lr',
+    #     environment='CarRacing-v3',
+    #     is_coevolved=False,
+    #     population_hebb_coeffs=[hebb_coeffs.clone() for _ in range(100)],
+    #     population_initial_weights_co=[init_weights.copy() for _ in range(100)]
+    # )
+    #
+    # rew_for_blur = evaluate(
+    #     hebb_rule='ABCD_lr',
+    #     environment='CarRacing-v3',
+    #     is_coevolved=False,
+    #     is_blur=True,
+    #     population_hebb_coeffs=[hebb_coeffs.clone() for _ in range(100)],
+    #     population_initial_weights_co=[init_weights.copy() for _ in range(100)]
+    # )
 
-    rew_for_blur = evaluate(
-        hebb_rule='ABCD_lr',
-        environment='CarRacing-v3',
-        is_coevolved=False,
-        is_blur=True,
-        population_hebb_coeffs=[hebb_coeffs.clone() for _ in range(100)],
-        population_initial_weights_co=[init_weights.copy() for _ in range(100)]
-    )
-
-    print(f'clear: {sum(rew_for_clear) / 100}')
-    print(f'blur: {sum(rew_for_blur) / 100}')
+    # print(f'clear: {sum(rew_for_clear) / 100}')
+    # print(f'blur: {sum(rew_for_blur) / 100}')
 
     # folder = Path('D:\Убежище\Университет\Диплом\Эксперименты\_законченные_')
     #

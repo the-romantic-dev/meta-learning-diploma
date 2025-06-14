@@ -23,7 +23,7 @@ from wrappers import FireEpisodicLifeEnv, ScaledFloatFrame
 def _weights_init(m, init_weights):
     if isinstance(m, torch.nn.Linear):
         if init_weights == 'xa_uni':
-            torch.nn.init.xavier_uniform(m.weight.data, 0.3)
+            torch.nn.init.xavier_uniform_(m.weight.data, 0.3)
         elif init_weights == 'sparse':
             torch.nn.init.sparse_(m.weight.data, 0.8)
         elif init_weights == 'uni':
@@ -187,15 +187,22 @@ def get_population_policies_outputs(population_policies, observations, environme
 
 
 def get_policy_outputs(policy, observations, environment, make_blur: bool = False):
-    # def show_tensor(tensor):
-    #     img = TF.to_pil_image(tensor.clamp(0, 1))
-    #     plt.imshow(img)
-    #     plt.axis('off')
+    # def show_two_tensors(tensor1, tensor2, figsize=(8, 4)):
+    #     # Создаём фигуру с двумя колонками
+    #     fig, axes = plt.subplots(1, 2, figsize=figsize)
+    #     for ax, t in zip(axes, (tensor1, tensor2)):
+    #         img = TF.to_pil_image(t.clamp(0, 1))
+    #         ax.imshow(img)
+    #         ax.axis('off')
+    #     plt.tight_layout()
     #     plt.show()
 
+    # before = torch.from_numpy(observations).clone()
     if make_blur:
         observations = blur_tensor(torch.from_numpy(observations), kernel_size=10).numpy()
-    # show_tensor(ttt)
+    # after = torch.from_numpy(observations).clone()
+    # show_two_tensors(before, after)
+    plt.show()
     policy_outputs = list(policy([observations]))
     if 'AntBulletEnv' in environment:
         policy_outputs[3] = torch.tanh(policy_outputs[3])

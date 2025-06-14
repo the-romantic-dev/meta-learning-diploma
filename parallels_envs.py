@@ -1,4 +1,4 @@
-from visual import sat
+
 import gymnasium as gym
 import multiprocessing as mp
 import numpy as np
